@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel de Pacientes · Hematologia</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+<script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+:root {
+  --ink:#1A1F2C; --muted:#6B7280; --surface:#FFFFFF; --bg:#F7F4EF;
+  --border:#E5E0D8; --accent:#8B2C3E; --accent2:#2D5F7C; --accent3:#5C7A6B;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--ink);font-family:'Inter',system-ui,sans-serif;font-size:14px}
+.serif{font-family:'Instrument Serif',Georgia,serif;font-weight:400;letter-spacing:-.01em}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+.eyebrow{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:500;transition:all .15s;cursor:pointer;border:1px solid transparent;font-family:inherit}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover:not(:disabled){background:#6f1f30}
+.btn-secondary{background:var(--surface);color:var(--ink);border-color:var(--border)}
+.btn-secondary:hover:not(:disabled){background:#F5F1EA}
+.btn-ghost{background:transparent;color:var(--muted)}
+.btn-ghost:hover{color:var(--ink);background:#F0EBE3}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px}
+.input,.select{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:13px;color:var(--ink);font-family:inherit;width:100%}
+.input:focus,.select:focus{outline:2px solid rgba(45,95,124,.2);border-color:var(--accent2)}
+.label{font-size:11px;font-weight:500;color:var(--muted);margin-bottom:4px;display:block;letter-spacing:.02em}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:500;padding:10px 12px;border-bottom:1px solid var(--border)}
+td{padding:12px 12px;font-size:13px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+.row-hover:hover td{background:#FAF6EF;cursor:pointer}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:500}
+::placeholder{color:#C0B8AE}
+textarea.input{resize:vertical}
+.dropzone{border:2px dashed var(--border);border-radius:10px;transition:all .2s;cursor:pointer}
+.dropzone:hover,.dropzone.drag-over{border-color:var(--accent2);background:rgba(45,95,124,.04)}
+.timeline-item{position:relative;padding-left:20px;padding-bottom:16px}
+.timeline-item::before{content:'';position:absolute;left:5px;top:8px;bottom:0;width:1px;background:var(--border)}
+.timeline-item:last-child::before{display:none}
+.timeline-dot{position:absolute;left:0;top:6px;width:11px;height:11px;border-radius:50%;background:var(--accent2);border:2px solid white;box-shadow:0 0 0 1px var(--accent2)}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner{animation:spin .8s linear infinite;display:inline-block}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.pulse{animation:pulse 1.4s ease-in-out infinite}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo, useRef, useCallback } = React;
+const { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } = Recharts;
+
+// ─── Storage ─────────────────────────────────────────────
+const KEY = 'hema_v3';
+const KEY_APIKEY = 'hema_apikey';
+const KEY_FS_GRANTED = 'hema_fs_granted';
+const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch { return []; } };
+const save = (d) => { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch {} };
+const loadKey = () => localStorage.getItem(KEY_APIKEY) || '';
+const saveKey = (k) => localStorage.setItem(KEY_APIKEY, k);
+
+// ─── IndexedDB — persiste o handle da pasta entre reloads ─
+const IDB_NAME = 'hema_fs_v1';
+const IDB_STORE = 'handles';
+
+function openIDB() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = (e) => e.target.result.createObjectStore(IDB_STORE);
+    req.onsuccess = (e) => res(e.target.result);
+    req.onerror = () => rej(req.error);
+  });
+}
+async function storeHandleIDB(handle) {
+  try {
+    const db = await openIDB();
+    await new Promise((res, rej) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(handle, 'sync_dir');
+      tx.oncomplete = res;
+      tx.onerror = () => rej(tx.error);
+    });
+  } catch(e) { console.warn('IDB store:', e); }
+}
+async function getHandleIDB() {
+  try {
+    const db = await openIDB();
+    return new Promise((res) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const req = tx.objectStore(IDB_STORE).get('sync_dir');
+      req.onsuccess = () => res(req.result || null);
+      req.onerror = () => res(null);
+    });
+  } catch { return null; }
+}
+
+// ─── File System Access ───────────────────────────────────
+// _dirHandle: handle ativo com permissão garantida
+// _pendingHandle: handle salvo no IDB mas que precisa de gesto do usuário para reautorizar
+let _dirHandle = null;
+let _pendingHandle = null;
+
+async function pickFolder() {
+  const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+  _dirHandle = handle;
+  _pendingHandle = null;
+  await storeHandleIDB(handle);
+  localStorage.setItem(KEY_FS_GRANTED, handle.name);
+  return handle;
+}
+
+// Tenta restaurar o handle do IDB sem precisar de interação do usuário.
+// Retorna o handle se a permissão já estiver concedida, null caso contrário
+// (nesse caso _pendingHandle fica populado para uso no próximo gesto).
+async function restoreFolder() {
+  const handle = await getHandleIDB();
+  if (!handle) return null;
+  try {
+    const perm = await handle.queryPermission({ mode: 'readwrite' });
+    if (perm === 'granted') {
+      _dirHandle = handle;
+      localStorage.setItem(KEY_FS_GRANTED, handle.name);
+      return handle;
+    }
+    if (perm === 'prompt') _pendingHandle = handle;
+  } catch {}
+  return null;
+}
+
+async function saveToFolder(jsonContent) {
+  if (!_dirHandle) throw new Error('NEED_FOLDER');
+  const fh = await _dirHandle.getFileHandle('pacientes.json', { create: true });
+  const w = await fh.createWritable();
+  await w.write(jsonContent);
+  await w.close();
+}
+
+// ─── Helpers ──────────────────────────────────────────────
+const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+const today = () => new Date().toISOString().slice(0,10);
+const fmtDate = (d) => d ? d.split('-').reverse().join('/') : '—';
+const fmtHM = (d) => d ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : '';
+
+// ─── SVG Icons ────────────────────────────────────────────
+const Ic = ({p, s=14, ...rest}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>{p}</svg>;
+const Icons = {
+  Search:   <><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></>,
+  Plus:     <><path d="M12 5v14M5 12h14"/></>,
+  Down:     <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></>,
+  Up:       <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></>,
+  Trash:    <><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></>,
+  Edit:     <><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></>,
+  X:        <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>,
+  Users:    <><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>,
+  Activity: <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>,
+  Stethoscope: <><path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3"/><path d="M8 15v1a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6v-4"/><circle cx="20" cy="10" r="2"/></>,
+  Building: <><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v8h4"/><path d="M18 9h2a2 2 0 0 1 2 2v11h-4"/><path d="M10 6h4M10 10h4M10 14h4M10 18h4"/></>,
+  Pill:     <><path d="m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7Z"/><path d="m8.5 8.5 7 7"/></>,
+  Chevron:  <polyline points="6 9 12 15 18 9"/>,
+  ChevronR: <polyline points="9 18 15 12 9 6"/>,
+  ChevronL: <polyline points="15 18 9 12 15 6"/>,
+  Cal:      <><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></>,
+  Image:    <><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></>,
+  Key:      <><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></>,
+  Alert:    <><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>,
+  Check:    <polyline points="20 6 9 17 4 12"/>,
+  Clock:    <><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></>,
+  Loader:   <><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></>,
+  Merge:    <><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M6 9v12"/></>,
+  Upload:   <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></>,
+};
+const I = ({n, s=14, ...r}) => <Ic p={Icons[n]} s={s} {...r}/>;
+
+// ─── Status colours ───────────────────────────────────────
+const SC = {
+  'Em tratamento':       ['#FBEEF0','#8B2C3E'],
+  'Em investigação':     ['#FEF5E7','#9C6F1A'],
+  'Primeira consulta':   ['#E7F0F5','#2D5F7C'],
+  'Seguimento':          ['#EAF1EC','#3F5E48'],
+  'Remissão':            ['#E5F0E8','#2D5F38'],
+  'Recidiva':            ['#FBEEF0','#7B1F2E'],
+  'Pré-TMO':             ['#F1ECF5','#5C3A7A'],
+  'Pós-TMO':             ['#F1ECF5','#5C3A7A'],
+  'Cuidados paliativos': ['#F2EDE8','#6B4F3A'],
+  'Alta':                ['#EAF1EC','#3F5E48'],
+};
+const STATUS_OPTIONS = Object.keys(SC);
+const statPill = (s) => { const c = SC[s]||['#F0EDE6','#5C5C5C']; return { background:c[0], color:c[1] }; };
+const PAL = ['#8B2C3E','#2D5F7C','#5C7A6B','#A8826B','#7A5C7A','#B8956A','#5C5C7A','#956A6A','#6A7A8B','#7A6B5C'];
+
+// ─── Normalise name ───────────────────────────────────────
+const normName = (n='') => n.trim().toUpperCase().replace(/\s+/g,' ');
+
+// ─── Claude vision extractor ──────────────────────────────
+async function extractPatientsFromImage(base64, mediaType, apiKey) {
+  const prompt = `Você está olhando para uma print de uma agenda médica hospitalar.
+Extraia TODOS os nomes de pacientes visíveis (ignore linhas como "FECHOU HORARIO", "REUNIAO" ou bloqueios de agenda).
+Para cada paciente, extraia o que for visível: nome completo, número de prontuário (se aparecer antes do nome), número de atendimento, horário.
+A data de hoje é ${today()}.
+
+Retorne APENAS um array JSON válido, sem markdown, sem explicação. Formato exato:
+[
+  {
+    "nome": "NOME COMPLETO DO PACIENTE",
+    "prontuario": "123456",
+    "atendimento": "7037268",
+    "data": "${today()}",
+    "hora": "09:00"
+  }
+]
+Se algum campo não for visível, omita-o ou use null. Retorne só o JSON, nada mais.`;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2000,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+          { type: 'text', text: prompt }
+        ]
+      }]
+    })
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `HTTP ${res.status}`);
+  }
+
+  const data = await res.json();
+  const text = data.content?.find(b => b.type === 'text')?.text || '';
+  const cleaned = text.replace(/```json|```/g,'').trim();
+  return JSON.parse(cleaned);
+}
+
+// ─── Main App ─────────────────────────────────────────────
+function App() {
+  const [patients, setPatients]     = useState(load);
+  const [apiKey, setApiKey]         = useState(loadKey);
+  const [fsGranted, setFsGranted]   = useState(!!localStorage.getItem(KEY_FS_GRANTED));
+  const [syncPending, setSyncPending] = useState(false);
+  const [fsSaving, setFsSaving]     = useState(false);
+  const [lastSync, setLastSync]     = useState(null);
+  const [view, setView]             = useState('list');
+  const [activeId, setActiveId]     = useState(null);
+  const [search, setSearch]         = useState('');
+  const [filters, setFilters]       = useState({diagnostico:'todos',convenio:'todos',tratamento:'todos',status:'todos'});
+  const [showAdd, setShowAdd]       = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [showKey, setShowKey]       = useState(false);
+  const [toast, setToast]           = useState(null);
+  const [tab, setTab]               = useState('lista');
+
+  // Persiste no localStorage
+  useEffect(() => save(patients), [patients]);
+
+  // Ao montar: tenta restaurar o handle da pasta sem pedir permissão ao usuário
+  useEffect(() => {
+    restoreFolder().then(handle => {
+      if (handle) {
+        setFsGranted(true);
+        setSyncPending(false);
+      } else if (_pendingHandle) {
+        // Pasta foi selecionada antes, mas precisa de clique para reautorizar
+        setFsGranted(true);
+        setSyncPending(true);
+      }
+    });
+  }, []);
+
+  const msg = (m, type='ok') => { setToast({m, type}); setTimeout(()=>setToast(null), 3500); };
+
+  const uniq = (k) => [...new Set(patients.map(p => p[k]).filter(Boolean))].sort();
+
+  // ── CRUD ──
+  const upsertFromAgenda = (extracted) => {
+    let added=0, updated=0;
+    setPatients(prev => {
+      let next = [...prev];
+      for (const e of extracted) {
+        const nNorm = normName(e.nome);
+        const idx = next.findIndex(p => normName(p.nome) === nNorm || (e.prontuario && p.prontuario === e.prontuario));
+        const consulta = { id:uid(), data:e.data||today(), hora:e.hora||'', atendimento:e.atendimento||'', obs:'' };
+        if (idx >= 0) {
+          const p = {...next[idx]};
+          const alreadyExists = p.consultas?.some(c => c.atendimento && c.atendimento === consulta.atendimento);
+          if (!alreadyExists) {
+            p.consultas = [...(p.consultas||[]), consulta].sort((a,b)=>b.data.localeCompare(a.data));
+            p.ultimaConsulta = p.consultas[0].data;
+            next[idx] = p;
+            updated++;
+          }
+        } else {
+          next.push({ id:uid(), nome:e.nome, prontuario:e.prontuario||'', idade:null, diagnostico:'', convenio:'', tratamento:'', status:'', consultas:[consulta], ultimaConsulta:consulta.data, createdAt:new Date().toISOString() });
+          added++;
+        }
+      }
+      return next;
+    });
+    return {added, updated};
+  };
+
+  const savePatient = (data) => {
+    if (data.id) {
+      setPatients(prev => prev.map(p => p.id === data.id ? {...p, ...data} : p));
+      msg('Paciente atualizado');
+    } else {
+      setPatients(prev => [...prev, {...data, id:uid(), consultas:[], createdAt:new Date().toISOString()}]);
+      msg('Paciente adicionado');
+    }
+    setShowAdd(false);
+  };
+
+  const deletePatient = (id) => {
+    setPatients(prev => prev.filter(p => p.id !== id));
+    if (activeId === id) { setView('list'); setActiveId(null); }
+    msg('Paciente removido');
+  };
+
+  const addConsulta = (patientId, consulta) => {
+    setPatients(prev => prev.map(p => {
+      if (p.id !== patientId) return p;
+      const consultas = [...(p.consultas||[]), {...consulta, id:uid()}].sort((a,b)=>b.data.localeCompare(a.data));
+      return {...p, consultas, ultimaConsulta: consultas[0].data};
+    }));
+    msg('Consulta adicionada');
+  };
+
+  const editConsulta = (patientId, consulta) => {
+    setPatients(prev => prev.map(p => {
+      if (p.id !== patientId) return p;
+      const consultas = p.consultas.map(c => c.id === consulta.id ? consulta : c).sort((a,b)=>b.data.localeCompare(a.data));
+      return {...p, consultas, ultimaConsulta: consultas[0]?.data||''};
+    }));
+  };
+
+  const deleteConsulta = (patientId, consultaId) => {
+    setPatients(prev => prev.map(p => {
+      if (p.id !== patientId) return p;
+      const consultas = p.consultas.filter(c => c.id !== consultaId).sort((a,b)=>b.data.localeCompare(a.data));
+      return {...p, consultas, ultimaConsulta: consultas[0]?.data||''};
+    }));
+  };
+
+  const exportJSON = () => {
+    const b = new Blob([JSON.stringify(patients, null,2)],{type:'application/json'});
+    const u = URL.createObjectURL(b);
+    const a = document.createElement('a'); a.href=u; a.download=`hema-${today()}.json`; a.click(); URL.revokeObjectURL(u);
+  };
+  const exportCSV = () => {
+    const cols = ['nome','idade','prontuario','diagnostico','convenio','tratamento','status','ultimaConsulta'];
+    const esc = v => `"${String(v??'').replace(/"/g,'""')}"`;
+    const rows = [cols.join(',')];
+    patients.forEach(p => rows.push(cols.map(c=>esc(p[c])).join(',')));
+    const b = new Blob(['﻿'+rows.join('\n')],{type:'text/csv;charset=utf-8'});
+    const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href=u; a.download=`hema-${today()}.csv`; a.click(); URL.revokeObjectURL(u);
+  };
+
+  // Importa pacientes de um arquivo .json (restaurar backup)
+  const importFromJSON = () => {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = '.json';
+    input.onchange = (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const data = JSON.parse(ev.target.result);
+          if (!Array.isArray(data)) throw new Error('Arquivo inválido');
+          if (confirm(`Restaurar ${data.length} pacientes? Os dados atuais serão substituídos.`)) {
+            setPatients(data);
+            msg(`${data.length} pacientes restaurados do arquivo`);
+          }
+        } catch(err) { msg('Erro ao importar: ' + err.message, 'err'); }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  };
+
+  const saveToFS = async (silent = false) => {
+    setFsSaving(true);
+    try {
+      if (!_dirHandle) {
+        // Tenta reautorizar com handle pendente (requer gesto do usuário)
+        if (_pendingHandle) {
+          const perm = await _pendingHandle.requestPermission({ mode: 'readwrite' });
+          if (perm === 'granted') {
+            _dirHandle = _pendingHandle;
+            _pendingHandle = null;
+            setFsGranted(true);
+            setSyncPending(false);
+            localStorage.setItem(KEY_FS_GRANTED, _dirHandle.name);
+          } else {
+            throw new Error('Permissão negada — selecione a pasta novamente.');
+          }
+        } else {
+          await pickFolder();
+          setFsGranted(true);
+          setSyncPending(false);
+        }
+      }
+      await saveToFolder(JSON.stringify(patients, null, 2));
+      setLastSync(new Date());
+      setSyncPending(false);
+      if (!silent) msg(`Sincronizado: ${_dirHandle.name}/pacientes.json`);
+    } catch(e) {
+      if (e.name === 'AbortError') return;
+      if (!silent) msg('Erro ao sincronizar: ' + e.message, 'err');
+      else setSyncPending(true);
+    } finally {
+      setFsSaving(false);
+    }
+  };
+
+  // Auto-save 2s após qualquer alteração nos pacientes
+  useEffect(() => {
+    if (!fsGranted || !patients.length) return;
+    if (!_dirHandle) {
+      if (_pendingHandle) setSyncPending(true);
+      return;
+    }
+    const t = setTimeout(() => saveToFS(true), 2000);
+    return () => clearTimeout(t);
+  }, [patients, fsGranted]);
+
+  const filtered = useMemo(() => patients.filter(p => {
+    if (search && !p.nome.toLowerCase().includes(search.toLowerCase())) return false;
+    if (filters.diagnostico !== 'todos' && p.diagnostico !== filters.diagnostico) return false;
+    if (filters.convenio !== 'todos' && p.convenio !== filters.convenio) return false;
+    if (filters.tratamento !== 'todos' && p.tratamento !== filters.tratamento) return false;
+    if (filters.status !== 'todos' && p.status !== filters.status) return false;
+    return true;
+  }).sort((a,b) => (b.ultimaConsulta||'').localeCompare(a.ultimaConsulta||'')), [patients, search, filters]);
+
+  const stats = useMemo(() => {
+    const t = today(); const dx={}, conv={};
+    patients.forEach(p => {
+      if (p.diagnostico) dx[p.diagnostico]=(dx[p.diagnostico]||0)+1;
+      if (p.convenio) conv[p.convenio]=(conv[p.convenio]||0)+1;
+    });
+    const topDx = Object.entries(dx).sort((a,b)=>b[1]-a[1])[0];
+    const topCv = Object.entries(conv).sort((a,b)=>b[1]-a[1])[0];
+    return { total:patients.length, hoje:patients.filter(p=>p.consultas?.some(c=>c.data===t)).length, topDx:topDx?.[0]||'—', topDxN:topDx?.[1]||0, topCv:topCv?.[0]||'—', topCvN:topCv?.[1]||0 };
+  }, [patients]);
+
+  const charts = useMemo(() => {
+    const tally = k => { const m={}; filtered.forEach(p=>{const v=p[k]||'—'; m[v]=(m[v]||0)+1;}); return Object.entries(m).map(([n,v])=>({name:n,value:v})).sort((a,b)=>b.value-a.value); };
+    const months = {};
+    filtered.forEach(p => (p.consultas||[]).forEach(c => { if(c.data){const k=c.data.slice(0,7); months[k]=(months[k]||0)+1;} }));
+    return { dx:tally('diagnostico'), conv:tally('convenio'), trat:tally('tratamento'), mes:Object.entries(months).sort().map(([n,v])=>({name:n,value:v})) };
+  }, [filtered]);
+
+  const activePatient = patients.find(p => p.id === activeId);
+  const hasFilter = search || Object.values(filters).some(v=>v!=='todos');
+
+  // Label do botão de sincronização
+  const syncLabel = fsSaving ? 'Sincronizando…'
+    : syncPending ? 'Clique p/ sincronizar'
+    : fsGranted && lastSync ? `pCloud ✓ · ${fmtHM(lastSync)}`
+    : fsGranted ? 'pCloud ✓'
+    : 'pCloud Drive';
+  const syncColor = syncPending ? '#B8860B' : fsGranted ? 'var(--accent3)' : 'var(--muted)';
+  const syncIcon = fsSaving ? 'Loader' : syncPending ? 'Alert' : 'Up';
+  const syncTitle = fsGranted
+    ? `Pasta: ${localStorage.getItem(KEY_FS_GRANTED)||'pCloud'} — salva em pacientes.json`
+    : 'Selecionar pasta do pCloud Drive';
+
+  return (
+    <div style={{minHeight:'100vh'}}>
+      {/* HEADER */}
+      <header style={{borderBottom:'1px solid var(--border)',background:'var(--surface)',position:'sticky',top:0,zIndex:30}}>
+        <div style={{maxWidth:1280,margin:'0 auto',padding:'14px 24px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
+          <div style={{display:'flex',alignItems:'center',gap:16}}>
+            {view==='patient' && (
+              <button className="btn btn-ghost" style={{padding:'6px 10px'}} onClick={()=>{setView('list');setActiveId(null);}}>
+                <I n="ChevronL"/> Lista
+              </button>
+            )}
+            <div>
+              <div className="eyebrow">Hematologia · Hospital 9 de Julho</div>
+              <h1 className="serif" style={{fontSize:26,lineHeight:1.1,marginTop:2}}>Painel de pacientes</h1>
+            </div>
+          </div>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+            <button className="btn btn-ghost" style={{padding:'7px 10px'}} onClick={()=>setShowKey(true)} title="Configurar API Key Claude">
+              <I n="Key"/>
+              <span style={{fontSize:11}}>{apiKey ? 'Claude ✓' : 'Claude API'}</span>
+            </button>
+            {/* Botão de sincronização com pCloud */}
+            <button
+              className="btn btn-ghost"
+              style={{padding:'7px 10px', color: syncColor}}
+              onClick={()=>saveToFS(false)}
+              title={syncTitle}
+              disabled={fsSaving}
+            >
+              <I n={syncIcon} className={fsSaving?'spinner':undefined}/>
+              <span style={{fontSize:11}}>{syncLabel}</span>
+            </button>
+            <button className="btn btn-secondary" onClick={()=>setShowImport(true)}><I n="Image"/> Importar print</button>
+            <button className="btn btn-secondary" onClick={importFromJSON} title="Restaurar de backup JSON"><I n="Upload"/> Restaurar</button>
+            <button className="btn btn-secondary" onClick={exportJSON} disabled={!patients.length}><I n="Down"/> JSON</button>
+            <button className="btn btn-primary" onClick={()=>setShowAdd(true)}><I n="Plus"/> Novo paciente</button>
+          </div>
+        </div>
+      </header>
+
+      <main style={{maxWidth:1280,margin:'0 auto',padding:'24px'}}>
+        {view === 'list' && <>
+          {/* STATS */}
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:12,marginBottom:20}}>
+            <StatCard icon="Users"       label="Total"           value={stats.total} sub="pacientes únicos"/>
+            <StatCard icon="Cal"         label="Consultados hoje" value={stats.hoje}  sub="passagens registradas" tint="var(--accent2)"/>
+            <StatCard icon="Stethoscope" label="Diagnóstico top"  value={stats.topDx} sub={`${stats.topDxN} caso(s)`} text tint="var(--accent)"/>
+            <StatCard icon="Building"    label="Convênio top"     value={stats.topCv} sub={`${stats.topCvN} paciente(s)`} text tint="var(--accent3)"/>
+          </div>
+
+          {/* TABS */}
+          <div style={{display:'flex',gap:4,marginBottom:16}}>
+            {['lista','graficos'].map(t=>(
+              <button key={t} onClick={()=>setTab(t)} style={{
+                padding:'6px 16px',borderRadius:6,fontSize:13,fontWeight:500,cursor:'pointer',border:'none',
+                background:tab===t?'var(--ink)':'transparent',color:tab===t?'white':'var(--muted)',transition:'all .15s'
+              }}>{t==='lista'?'Lista de pacientes':'Gráficos'}</button>
+            ))}
+          </div>
+
+          {tab === 'lista' && <>
+            <div className="card" style={{padding:16,marginBottom:16}}>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr',gap:10}}>
+                <div>
+                  <label className="label">Buscar</label>
+                  <div style={{position:'relative'}}>
+                    <span style={{position:'absolute',left:10,top:10,color:'var(--muted)',pointerEvents:'none'}}><I n="Search"/></span>
+                    <input className="input" style={{paddingLeft:32}} placeholder="Nome…" value={search} onChange={e=>setSearch(e.target.value)}/>
+                  </div>
+                </div>
+                {['diagnostico','convenio','tratamento','status'].map(k=>(
+                  <div key={k}>
+                    <label className="label">{k.charAt(0).toUpperCase()+k.slice(1)}</label>
+                    <div style={{position:'relative'}}>
+                      <select className="select" style={{appearance:'none',paddingRight:28}} value={filters[k]} onChange={e=>setFilters({...filters,[k]:e.target.value})}>
+                        <option value="todos">Todos</option>
+                        {uniq(k).map(o=><option key={o} value={o}>{o}</option>)}
+                      </select>
+                      <span style={{position:'absolute',right:8,top:10,pointerEvents:'none',color:'var(--muted)'}}><I n="Chevron"/></span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {hasFilter && (
+                <div style={{marginTop:10,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span style={{fontSize:12,color:'var(--muted)'}}>
+                    <span className="mono" style={{color:'var(--ink)'}}>{filtered.length}</span> de {patients.length}
+                  </span>
+                  <button className="btn btn-ghost" style={{fontSize:12,padding:'4px 10px'}} onClick={()=>{setSearch('');setFilters({diagnostico:'todos',convenio:'todos',tratamento:'todos',status:'todos'});}}>
+                    <I n="X" s={12}/> Limpar filtros
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="card" style={{overflow:'hidden'}}>
+              {patients.length === 0 ? (
+                <div style={{padding:'60px 24px',textAlign:'center'}}>
+                  <div className="serif" style={{fontSize:22,color:'var(--muted)',marginBottom:8}}>Nenhum paciente cadastrado</div>
+                  <p style={{fontSize:13,color:'var(--muted)',marginBottom:16}}>Importe um print da agenda, restaure um backup ou adicione manualmente.</p>
+                  <div style={{display:'flex',gap:8,justifyContent:'center'}}>
+                    <button className="btn btn-primary" onClick={()=>setShowImport(true)}><I n="Image"/> Importar print</button>
+                    <button className="btn btn-secondary" onClick={importFromJSON}><I n="Upload"/> Restaurar JSON</button>
+                    <button className="btn btn-secondary" onClick={()=>setShowAdd(true)}><I n="Plus"/> Adicionar</button>
+                  </div>
+                </div>
+              ) : filtered.length === 0 ? (
+                <div style={{padding:40,textAlign:'center',color:'var(--muted)',fontSize:13}}>Nenhum paciente corresponde aos filtros.</div>
+              ) : (
+                <div style={{overflowX:'auto'}}>
+                  <table>
+                    <thead><tr>
+                      <th>Paciente</th><th>Diagnóstico</th><th>Convênio</th>
+                      <th>Tratamento</th><th>Status</th><th>Última consulta</th><th>Consultas</th><th style={{width:72}}></th>
+                    </tr></thead>
+                    <tbody>
+                      {filtered.map(p=>(
+                        <tr key={p.id} className="row-hover" onClick={()=>{setActiveId(p.id);setView('patient');}}>
+                          <td>
+                            <div style={{fontWeight:600,fontSize:13}}>{p.nome}</div>
+                            {p.prontuario && <div className="mono" style={{fontSize:10,color:'var(--muted)',marginTop:2}}>#{p.prontuario}</div>}
+                          </td>
+                          <td style={{fontSize:13}}>{p.diagnostico||<span style={{color:'var(--muted)'}}>—</span>}</td>
+                          <td style={{fontSize:13}}>{p.convenio||<span style={{color:'var(--muted)'}}>—</span>}</td>
+                          <td style={{fontSize:12}}>{p.tratamento||<span style={{color:'var(--muted)'}}>—</span>}</td>
+                          <td>{p.status?<span className="pill" style={statPill(p.status)}>{p.status}</span>:<span style={{color:'var(--muted)',fontSize:12}}>—</span>}</td>
+                          <td className="mono" style={{fontSize:12}}>{p.ultimaConsulta?fmtDate(p.ultimaConsulta):'—'}</td>
+                          <td>
+                            <span style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:999,padding:'2px 8px',fontSize:11,fontFamily:'JetBrains Mono,monospace'}}>
+                              {(p.consultas||[]).length}
+                            </span>
+                          </td>
+                          <td onClick={e=>e.stopPropagation()}>
+                            <div style={{display:'flex',gap:4}}>
+                              <button className="btn btn-ghost" style={{padding:6}} onClick={e=>{e.stopPropagation();setShowAdd(p);}} title="Editar"><I n="Edit" s={13}/></button>
+                              <button className="btn btn-ghost" style={{padding:6,color:'var(--accent)'}} onClick={e=>{e.stopPropagation();if(confirm('Remover '+p.nome+'?'))deletePatient(p.id);}} title="Excluir"><I n="Trash" s={13}/></button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </>}
+
+          {tab === 'graficos' && (
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+              <ChartCard title="Diagnósticos" icon="Stethoscope">
+                {charts.dx.length ? (
+                  <ResponsiveContainer width="100%" height={240}>
+                    <PieChart>
+                      <Pie data={charts.dx} dataKey="value" nameKey="name" cx="40%" cy="50%" outerRadius={80} innerRadius={40} paddingAngle={2}>
+                        {charts.dx.map((_,i)=><Cell key={i} fill={PAL[i%PAL.length]} stroke="white" strokeWidth={2}/>)}
+                      </Pie>
+                      <Tooltip contentStyle={{fontSize:12,border:'1px solid var(--border)'}}/>
+                      <Recharts.Legend layout="vertical" align="right" verticalAlign="middle" wrapperStyle={{fontSize:11}}/>
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : <Empty/>}
+              </ChartCard>
+              <ChartCard title="Convênios" icon="Building">
+                {charts.conv.length ? (
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={charts.conv} layout="vertical" margin={{left:60}}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false}/>
+                      <XAxis type="number" tick={{fontSize:11,fill:'var(--muted)'}}/>
+                      <YAxis type="category" dataKey="name" tick={{fontSize:11}} width={120}/>
+                      <Tooltip contentStyle={{fontSize:12,border:'1px solid var(--border)'}}/>
+                      <Bar dataKey="value" fill="#2D5F7C" radius={[0,4,4,0]}/>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : <Empty/>}
+              </ChartCard>
+              <ChartCard title="Tratamentos" icon="Pill">
+                {charts.trat.length ? (
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={charts.trat} margin={{bottom:32}}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
+                      <XAxis dataKey="name" tick={{fontSize:10,fill:'var(--muted)'}} angle={-30} textAnchor="end"/>
+                      <YAxis tick={{fontSize:11,fill:'var(--muted)'}}/>
+                      <Tooltip contentStyle={{fontSize:12,border:'1px solid var(--border)'}}/>
+                      <Bar dataKey="value" fill="#5C7A6B" radius={[4,4,0,0]}/>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : <Empty/>}
+              </ChartCard>
+              <ChartCard title="Consultas por mês" icon="Activity">
+                {charts.mes.length ? (
+                  <ResponsiveContainer width="100%" height={240}>
+                    <LineChart data={charts.mes}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)"/>
+                      <XAxis dataKey="name" tick={{fontSize:11,fill:'var(--muted)'}}/>
+                      <YAxis tick={{fontSize:11,fill:'var(--muted)'}}/>
+                      <Tooltip contentStyle={{fontSize:12,border:'1px solid var(--border)'}}/>
+                      <Line type="monotone" dataKey="value" stroke="var(--accent)" strokeWidth={2} dot={{fill:'var(--accent)',r:4}}/>
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : <Empty/>}
+              </ChartCard>
+            </div>
+          )}
+
+          <div style={{marginTop:16,textAlign:'center',fontSize:11,color:'var(--muted)'}}>
+            <span className="mono">{patients.length}</span> pacientes · dados salvos no navegador
+            {fsGranted && lastSync && <> · sincronizado às <span className="mono">{fmtHM(lastSync)}</span></>}
+            {syncPending && <> · <span style={{color:'#B8860B'}}>sincronização pendente — clique no botão pCloud</span></>}
+          </div>
+        </>}
+
+        {view === 'patient' && activePatient && (
+          <PatientDetail
+            patient={activePatient}
+            onEdit={() => setShowAdd(activePatient)}
+            onDelete={() => deletePatient(activePatient.id)}
+            onAddConsulta={(c) => addConsulta(activePatient.id, c)}
+            onEditConsulta={(c) => editConsulta(activePatient.id, c)}
+            onDeleteConsulta={(cid) => deleteConsulta(activePatient.id, cid)}
+          />
+        )}
+      </main>
+
+      {/* MODALS */}
+      {showAdd && (
+        <PatientForm
+          patient={typeof showAdd === 'object' && showAdd.id ? showAdd : null}
+          onSave={savePatient}
+          onClose={()=>setShowAdd(false)}
+          existing={{diagnosticos:uniq('diagnostico'),convenios:uniq('convenio'),tratamentos:uniq('tratamento')}}
+        />
+      )}
+      {showImport && (
+        <ImportModal
+          apiKey={apiKey}
+          onDone={(extracted) => {
+            const {added, updated} = upsertFromAgenda(extracted);
+            setShowImport(false);
+            msg(`${added} novo(s) + ${updated} atualizado(s)`);
+          }}
+          onClose={()=>setShowImport(false)}
+          onNeedKey={()=>{setShowImport(false);setShowKey(true);}}
+        />
+      )}
+      {showKey && <ApiKeyModal apiKey={apiKey} onSave={(k)=>{saveKey(k);setApiKey(k);setShowKey(false);msg('Claude API Key salva');}} onClose={()=>setShowKey(false)}/>}
+
+      {toast && (
+        <div style={{
+          position:'fixed',bottom:24,right:24,
+          background:toast.type==='err'?'#7B1F2E':'var(--ink)',
+          color:'white',padding:'10px 16px',borderRadius:6,fontSize:13,
+          boxShadow:'0 8px 24px rgba(0,0,0,0.18)',zIndex:100,
+          display:'flex',alignItems:'center',gap:8
+        }}>
+          {toast.type==='err' && <I n="Alert"/>}
+          {toast.type==='ok' && <I n="Check"/>}
+          {toast.m}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Patient Detail ───────────────────────────────────────
+function PatientDetail({ patient, onEdit, onDelete, onAddConsulta, onEditConsulta, onDeleteConsulta }) {
+  const [showAddC, setShowAddC] = useState(false);
+  const [editC, setEditC] = useState(null);
+  const consultas = [...(patient.consultas||[])].sort((a,b)=>b.data.localeCompare(a.data));
+
+  return (
+    <div>
+      <div className="card" style={{padding:24,marginBottom:16}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:16,flexWrap:'wrap'}}>
+          <div>
+            <div className="eyebrow" style={{marginBottom:4}}>Ficha do paciente</div>
+            <h2 className="serif" style={{fontSize:30}}>{patient.nome}</h2>
+            <div style={{display:'flex',gap:16,marginTop:6,flexWrap:'wrap'}}>
+              {patient.prontuario && <span className="mono" style={{fontSize:12,color:'var(--muted)'}}>Prontuário #{patient.prontuario}</span>}
+              {patient.idade && <span style={{fontSize:13,color:'var(--muted)'}}>{patient.idade} anos</span>}
+              {patient.status && <span className="pill" style={statPill(patient.status)}>{patient.status}</span>}
+            </div>
+          </div>
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn btn-secondary" onClick={onEdit}><I n="Edit" s={13}/> Editar</button>
+            <button className="btn btn-ghost" style={{color:'var(--accent)'}} onClick={()=>{if(confirm('Remover este paciente?'))onDelete();}}><I n="Trash" s={13}/></button>
+          </div>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:16,marginTop:20}}>
+          <InfoField label="Diagnóstico" icon="Stethoscope" value={patient.diagnostico}/>
+          <InfoField label="Convênio" icon="Building" value={patient.convenio}/>
+          <InfoField label="Tratamento" icon="Pill" value={patient.tratamento}/>
+          <InfoField label="Última consulta" icon="Cal" value={patient.ultimaConsulta ? fmtDate(patient.ultimaConsulta) : null}/>
+        </div>
+      </div>
+
+      <div className="card" style={{padding:24}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
+          <div>
+            <div className="eyebrow">Histórico</div>
+            <h3 className="serif" style={{fontSize:22,marginTop:2}}>Consultas</h3>
+          </div>
+          <button className="btn btn-primary" onClick={()=>setShowAddC(true)}><I n="Plus"/> Registrar consulta</button>
+        </div>
+        {consultas.length === 0 ? (
+          <div style={{padding:'40px 0',textAlign:'center',color:'var(--muted)',fontSize:13}}>Nenhuma consulta registrada ainda.</div>
+        ) : (
+          <div style={{paddingLeft:8}}>
+            {consultas.map((c,i)=>(
+              <div key={c.id} className="timeline-item">
+                <div className="timeline-dot" style={{background: i===0 ? 'var(--accent)' : 'var(--accent2)'}}/>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
+                  <div style={{flex:1}}>
+                    <div style={{display:'flex',alignItems:'center',gap:10}}>
+                      <span className="mono" style={{fontSize:13,fontWeight:500}}>{fmtDate(c.data)}</span>
+                      {c.hora && <span style={{fontSize:12,color:'var(--muted)'}}>{c.hora}</span>}
+                      {c.atendimento && <span className="mono" style={{fontSize:11,color:'var(--muted)'}}>Atend. {c.atendimento}</span>}
+                      {i===0 && <span style={{background:'#FBEEF0',color:'var(--accent)',fontSize:10,fontWeight:600,padding:'1px 6px',borderRadius:999}}>Mais recente</span>}
+                    </div>
+                    {c.obs && <p style={{marginTop:6,fontSize:13,color:'var(--muted)',lineHeight:1.5}}>{c.obs}</p>}
+                    {c.diagnostico && <p style={{marginTop:4,fontSize:12,color:'var(--ink)'}}><strong>Diagnóstico:</strong> {c.diagnostico}</p>}
+                    {c.tratamento && <p style={{fontSize:12,color:'var(--ink)'}}><strong>Tratamento:</strong> {c.tratamento}</p>}
+                  </div>
+                  <div style={{display:'flex',gap:4,flexShrink:0}}>
+                    <button className="btn btn-ghost" style={{padding:5}} onClick={()=>setEditC(c)} title="Editar"><I n="Edit" s={12}/></button>
+                    <button className="btn btn-ghost" style={{padding:5,color:'var(--accent)'}} onClick={()=>{if(confirm('Remover esta consulta?'))onDeleteConsulta(c.id);}} title="Excluir"><I n="Trash" s={12}/></button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showAddC && <ConsultaForm onSave={(c)=>{onAddConsulta(c);setShowAddC(false);}} onClose={()=>setShowAddC(false)}/>}
+      {editC && <ConsultaForm consulta={editC} onSave={(c)=>{onEditConsulta(c);setEditC(null);}} onClose={()=>setEditC(null)}/>}
+    </div>
+  );
+}
+
+function InfoField({label, icon, value}) {
+  return (
+    <div>
+      <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:4}}>
+        <span style={{color:'var(--muted)'}}><I n={icon} s={12}/></span>
+        <span className="eyebrow">{label}</span>
+      </div>
+      <div style={{fontSize:14,color:value?'var(--ink)':'var(--muted)',fontWeight:value?500:400}}>
+        {value||'Não informado'}
+      </div>
+    </div>
+  );
+}
+
+// ─── Import Modal ─────────────────────────────────────────
+function ImportModal({ apiKey, onDone, onClose, onNeedKey }) {
+  const [stage, setStage]         = useState('drop');
+  const [dragging, setDragging]   = useState(false);
+  const [loading, setLoading]     = useState(false);
+  const [loadMsg, setLoadMsg]     = useState('');
+  const [extracted, setExtracted] = useState([]);
+  const [error, setError]         = useState('');
+  const fileRef = useRef();
+
+  const processFiles = async (files) => {
+    if (!apiKey) { onNeedKey(); return; }
+    setLoading(true); setError('');
+    setLoadMsg(`Processando ${files.length} imagem(ns)…`);
+    try {
+      const convertToJpeg = (file) => new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onerror = () => rej(new Error('Erro ao ler ' + file.name));
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onerror = () => rej(new Error('Formato não suportado: ' + file.name));
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const max = 2400; let w = img.width, h = img.height;
+            if (w > max || h > max) { if (w > h) { h = Math.round(h*max/w); w=max; } else { w=Math.round(w*max/h); h=max; } }
+            canvas.width = w; canvas.height = h;
+            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+            res({ b64: dataUrl.split(',')[1], mt: 'image/jpeg' });
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+      setLoadMsg(`Convertendo imagens…`);
+      const converted = await Promise.all(files.map(convertToJpeg));
+      setLoadMsg(`Enviando ${files.length} print(s) para Claude…`);
+      const results = await Promise.all(converted.map(({ b64, mt }) => extractPatientsFromImage(b64, mt, apiKey)));
+      const seen = new Set(); const merged = [];
+      for (const arr of results) for (const p of arr) {
+        const key = normName(p.nome) + '|' + (p.atendimento || '');
+        if (!seen.has(key)) { seen.add(key); merged.push(p); }
+      }
+      setExtracted(merged); setStage('preview');
+    } catch(e) { setError('Erro: ' + e.message); }
+    finally { setLoading(false); setLoadMsg(''); }
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault(); setDragging(false);
+    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/') || f.name.match(/\.(heic|heif)$/i));
+    if (files.length) processFiles(files);
+  };
+
+  const editRow = (i, k, v) => setExtracted(prev => prev.map((r,j)=>j===i?{...r,[k]:v}:r));
+  const removeRow = (i) => setExtracted(prev => prev.filter((_,j)=>j!==i));
+
+  return (
+    <Modal title="Importar agenda" onClose={onClose} wide>
+      {!apiKey && (
+        <div style={{background:'#FEF5E7',border:'1px solid #F0D080',borderRadius:6,padding:'10px 14px',marginBottom:16,fontSize:13,color:'#7A5200',display:'flex',gap:8,alignItems:'center'}}>
+          <I n="Alert" s={14}/><span>Configure a <strong>API Key</strong> do Claude para extração automática.</span>
+          <button className="btn btn-secondary" style={{marginLeft:'auto',fontSize:12,padding:'4px 10px'}} onClick={onNeedKey}>Configurar</button>
+        </div>
+      )}
+      {stage === 'drop' && (
+        <>
+          <div className={`dropzone${dragging?' drag-over':''}`} style={{padding:'48px 24px',textAlign:'center',marginBottom:16}}
+            onDragOver={e=>{e.preventDefault();setDragging(true);}} onDragLeave={()=>setDragging(false)}
+            onDrop={onDrop} onClick={()=>fileRef.current.click()}>
+            {loading ? (
+              <div style={{color:'var(--muted)'}}>
+                <I n="Loader" s={32} className="spinner" style={{display:'block',margin:'0 auto 12px',color:'var(--accent2)'}}/>
+                <div style={{fontSize:14,fontWeight:500}} className="pulse">{loadMsg}</div>
+              </div>
+            ) : (
+              <>
+                <I n="Image" s={36} style={{color:'var(--muted)',display:'block',margin:'0 auto 12px'}}/>
+                <div className="serif" style={{fontSize:20,marginBottom:6}}>Arraste o print aqui</div>
+                <div style={{fontSize:13,color:'var(--muted)'}}>ou clique para selecionar · JPG, PNG, HEIC · pode selecionar várias</div>
+              </>
+            )}
+          </div>
+          <input ref={fileRef} type="file" accept="image/*" multiple style={{display:'none'}} onChange={e=>{ const files=Array.from(e.target.files); if(files.length) processFiles(files); }}/>
+          {error && <div style={{background:'#FBEEF0',color:'var(--accent)',padding:'10px 14px',borderRadius:6,fontSize:13,marginBottom:12}}>{error}</div>}
+        </>
+      )}
+      {stage === 'preview' && (
+        <>
+          <div style={{background:'#EAF1EC',color:'#2D5F38',padding:'8px 14px',borderRadius:6,marginBottom:14,fontSize:13,display:'flex',gap:6,alignItems:'center'}}>
+            <I n="Check" s={13}/> {extracted.length} paciente(s) extraído(s). Revise antes de importar.
+          </div>
+          <div style={{overflowX:'auto',marginBottom:16}}>
+            <table>
+              <thead><tr><th>Nome</th><th>Prontuário</th><th>Atendimento</th><th>Data</th><th>Hora</th><th style={{width:40}}></th></tr></thead>
+              <tbody>
+                {extracted.map((r,i)=>(
+                  <tr key={i}>
+                    <td><input className="input" value={r.nome||''} onChange={e=>editRow(i,'nome',e.target.value)} style={{minWidth:200}}/></td>
+                    <td><input className="input" value={r.prontuario||''} onChange={e=>editRow(i,'prontuario',e.target.value)} style={{width:90}}/></td>
+                    <td><input className="input" value={r.atendimento||''} onChange={e=>editRow(i,'atendimento',e.target.value)} style={{width:90}}/></td>
+                    <td><input className="input" type="date" value={r.data||today()} onChange={e=>editRow(i,'data',e.target.value)} style={{width:130}}/></td>
+                    <td><input className="input" type="time" value={r.hora||''} onChange={e=>editRow(i,'hora',e.target.value)} style={{width:90}}/></td>
+                    <td><button className="btn btn-ghost" style={{padding:5,color:'var(--accent)'}} onClick={()=>removeRow(i)}><I n="X" s={12}/></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <button className="btn btn-ghost" onClick={()=>setStage('drop')}>← Voltar</button>
+            <button className="btn btn-primary" onClick={()=>onDone(extracted)} disabled={!extracted.length}>
+              <I n="Merge"/> Importar {extracted.length} paciente(s)
+            </button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+// ─── Patient Form ─────────────────────────────────────────
+function PatientForm({ patient, onSave, onClose, existing }) {
+  const [f, setF] = useState({
+    nome:patient?.nome||'', prontuario:patient?.prontuario||'', idade:patient?.idade||'',
+    diagnostico:patient?.diagnostico||'', convenio:patient?.convenio||'',
+    tratamento:patient?.tratamento||'', status:patient?.status||'',
+  });
+  const set = (k,v) => setF({...f,[k]:v});
+  return (
+    <Modal title={patient?.id ? 'Editar paciente' : 'Novo paciente'} onClose={onClose} wide>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+        <div style={{gridColumn:'1/-1'}}><label className="label">Nome *</label><input className="input" value={f.nome} onChange={e=>set('nome',e.target.value)} autoFocus/></div>
+        <div><label className="label">Prontuário</label><input className="input" value={f.prontuario} onChange={e=>set('prontuario',e.target.value)}/></div>
+        <div><label className="label">Idade</label><input className="input" type="number" value={f.idade} onChange={e=>set('idade',e.target.value)}/></div>
+        <div>
+          <label className="label">Diagnóstico</label>
+          <input className="input" list="dx-l" value={f.diagnostico} onChange={e=>set('diagnostico',e.target.value)} placeholder="Ex.: Mieloma Múltiplo"/>
+          <datalist id="dx-l">{existing.diagnosticos.map(d=><option key={d} value={d}/>)}</datalist>
+        </div>
+        <div>
+          <label className="label">Convênio</label>
+          <input className="input" list="cv-l" value={f.convenio} onChange={e=>set('convenio',e.target.value)} placeholder="Ex.: Bradesco Saúde"/>
+          <datalist id="cv-l">{existing.convenios.map(d=><option key={d} value={d}/>)}</datalist>
+        </div>
+        <div style={{gridColumn:'1/-1'}}>
+          <label className="label">Tratamento</label>
+          <input className="input" list="tr-l" value={f.tratamento} onChange={e=>set('tratamento',e.target.value)} placeholder="Ex.: DRd, VRd, R-CHOP, ibrutinibe…"/>
+          <datalist id="tr-l">{existing.tratamentos.map(d=><option key={d} value={d}/>)}</datalist>
+        </div>
+        <div style={{gridColumn:'1/-1'}}>
+          <label className="label">Status</label>
+          <div style={{position:'relative'}}>
+            <select className="select" value={f.status} onChange={e=>set('status',e.target.value)} style={{appearance:'none',paddingRight:28}}>
+              <option value="">—</option>
+              {STATUS_OPTIONS.map(s=><option key={s} value={s}>{s}</option>)}
+            </select>
+            <span style={{position:'absolute',right:8,top:10,pointerEvents:'none',color:'var(--muted)'}}><I n="Chevron"/></span>
+          </div>
+        </div>
+      </div>
+      <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:20}}>
+        <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-primary" onClick={()=>{if(!f.nome.trim())return; onSave({...patient,...f,idade:f.idade?Number(f.idade):null});}} disabled={!f.nome.trim()}>
+          {patient?.id ? 'Salvar' : 'Adicionar'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Consulta Form ────────────────────────────────────────
+function ConsultaForm({ consulta, onSave, onClose }) {
+  const [f, setF] = useState({
+    data:consulta?.data||today(), hora:consulta?.hora||'',
+    atendimento:consulta?.atendimento||'', diagnostico:consulta?.diagnostico||'',
+    tratamento:consulta?.tratamento||'', obs:consulta?.obs||''
+  });
+  const set = (k,v) => setF({...f,[k]:v});
+  return (
+    <Modal title={consulta ? 'Editar consulta' : 'Registrar consulta'} onClose={onClose}>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+        <div><label className="label">Data *</label><input className="input" type="date" value={f.data} onChange={e=>set('data',e.target.value)}/></div>
+        <div><label className="label">Horário</label><input className="input" type="time" value={f.hora} onChange={e=>set('hora',e.target.value)}/></div>
+        <div style={{gridColumn:'1/-1'}}><label className="label">Nº Atendimento</label><input className="input" value={f.atendimento} onChange={e=>set('atendimento',e.target.value)} placeholder="Ex.: 7037268"/></div>
+        <div><label className="label">Diagnóstico nesta consulta</label><input className="input" value={f.diagnostico} onChange={e=>set('diagnostico',e.target.value)}/></div>
+        <div><label className="label">Tratamento nesta consulta</label><input className="input" value={f.tratamento} onChange={e=>set('tratamento',e.target.value)}/></div>
+        <div style={{gridColumn:'1/-1'}}><label className="label">Observações</label><textarea className="input" rows={3} value={f.obs} onChange={e=>set('obs',e.target.value)} placeholder="Evolução, intercorrências, ajuste de dose…"/></div>
+      </div>
+      <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:20}}>
+        <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-primary" onClick={()=>onSave({...consulta,...f})} disabled={!f.data}>
+          {consulta ? 'Salvar' : 'Registrar'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── API Key Modal ────────────────────────────────────────
+function ApiKeyModal({ apiKey, onSave, onClose }) {
+  const [k, setK] = useState(apiKey);
+  return (
+    <Modal title="API Key do Claude" onClose={onClose}>
+      <p style={{fontSize:13,color:'var(--muted)',marginBottom:12,lineHeight:1.6}}>
+        A extração automática de prints usa a API do Claude (Anthropic).<br/>
+        Sua chave fica salva <strong>apenas no seu navegador</strong> (localStorage) e nunca é enviada para nenhum servidor além da Anthropic.
+      </p>
+      <label className="label">Chave (começa com sk-ant-…)</label>
+      <input className="input mono" type="password" value={k} onChange={e=>setK(e.target.value)} placeholder="sk-ant-api03-…" style={{marginBottom:8}}/>
+      <p style={{fontSize:11,color:'var(--muted)',marginBottom:16}}>
+        Obtenha em <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style={{color:'var(--accent2)'}}>console.anthropic.com/settings/keys</a>
+      </p>
+      <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
+        <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-primary" onClick={()=>onSave(k)} disabled={!k?.trim()}>Salvar chave</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Shared components ────────────────────────────────────
+function StatCard({ icon, label, value, sub, tint, text }) {
+  return (
+    <div className="card" style={{padding:16}}>
+      <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
+        <span style={{color:tint||'var(--accent)'}}><I n={icon} s={13}/></span>
+        <span className="eyebrow">{label}</span>
+      </div>
+      <div className={text?'serif':'mono'} style={{fontSize:text?18:28,lineHeight:1.1,fontWeight:text?400:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{value}</div>
+      <div style={{fontSize:11,color:'var(--muted)',marginTop:4}}>{sub}</div>
+    </div>
+  );
+}
+function ChartCard({ title, icon, children }) {
+  return (
+    <div className="card" style={{padding:16}}>
+      <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:12}}>
+        <span style={{color:'var(--muted)'}}><I n={icon} s={12}/></span>
+        <span className="eyebrow">{title}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+const Empty = () => <div style={{height:240,display:'flex',alignItems:'center',justifyContent:'center',color:'var(--muted)',fontSize:12}}>Sem dados</div>;
+function Modal({ title, children, onClose, wide }) {
+  return (
+    <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(26,31,44,.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:50,padding:16}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:'white',borderRadius:10,width:wide?740:520,maxWidth:'100%',maxHeight:'90vh',overflowY:'auto',boxShadow:'0 20px 60px rgba(0,0,0,.2)'}}>
+        <div style={{padding:'16px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',borderBottom:'1px solid var(--border)'}}>
+          <h3 className="serif" style={{fontSize:22}}>{title}</h3>
+          <button className="btn btn-ghost" style={{padding:6}} onClick={onClose}><I n="X" s={16}/></button>
+        </div>
+        <div style={{padding:20}}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
