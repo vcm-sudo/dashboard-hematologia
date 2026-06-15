@@ -12,7 +12,7 @@
 <script src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
 <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/heic-to@1.5.2/dist/iife/heic-to.js"></script>
 <style>
 :root {
   --ink:#1A1F2C; --muted:#6B7280; --surface:#FFFFFF; --bg:#F7F4EF;
@@ -274,6 +274,9 @@ function App() {
   const [showKey, setShowKey]       = useState(false);
   const [toast, setToast]           = useState(null);
   const [tab, setTab]               = useState('lista');
+  const [sort, setSort]             = useState({key:'ultimaConsulta', dir:'desc'});
+  const [consultaPeriod, setConsultaPeriod] = useState('mes');
+  const [hiddenDx, setHiddenDx]     = useState([]);   // diagnósticos ocultos no donut
 
   // Persiste no localStorage
   useEffect(() => save(patients), [patients]);
@@ -430,6 +433,25 @@ function App() {
       if (!silent) msg(`Sincronizado: ${_dirHandle.name}/pacientes.json`);
     } catch(e) {
       if (e.name === 'AbortError') return;
+      // Handle do pCloud ficou "stale" (drive remontado): descarta e tenta re-selecionar a pasta.
+      if (e.name === 'NotFoundError') {
+        _dirHandle = null; _pendingHandle = null;
+        if (!silent) {
+          try {
+            await pickFolder();              // ainda dentro do gesto do clique
+            setFsGranted(true); setSyncPending(false);
+            await saveToFolder(JSON.stringify(patients, null, 2));
+            setLastSync(new Date());
+            msg(`Sincronizado: ${_dirHandle.name}/pacientes.json`);
+          } catch(e2) {
+            if (e2.name === 'AbortError') return;
+            msg('A pasta do pCloud não foi encontrada (drive remontado). Clique no botão pCloud e selecione a pasta novamente.', 'err');
+          }
+        } else {
+          setSyncPending(true);            // auto-save: pede clique do usuário
+        }
+        return;
+      }
       if (!silent) msg('Erro ao sincronizar: ' + e.message, 'err');
       else setSyncPending(true);
     } finally {
@@ -448,14 +470,31 @@ function App() {
     return () => clearTimeout(t);
   }, [patients, fsGranted]);
 
-  const filtered = useMemo(() => patients.filter(p => {
-    if (search && !p.nome.toLowerCase().includes(search.toLowerCase())) return false;
-    if (filters.diagnostico !== 'todos' && p.diagnostico !== filters.diagnostico) return false;
-    if (filters.convenio !== 'todos' && p.convenio !== filters.convenio) return false;
-    if (filters.tratamento !== 'todos' && p.tratamento !== filters.tratamento) return false;
-    if (filters.status !== 'todos' && p.status !== filters.status) return false;
-    return true;
-  }).sort((a,b) => (b.ultimaConsulta||'').localeCompare(a.ultimaConsulta||'')), [patients, search, filters]);
+  const filtered = useMemo(() => {
+    const list = patients.filter(p => {
+      if (search && !p.nome.toLowerCase().includes(search.toLowerCase())) return false;
+      if (filters.diagnostico !== 'todos' && p.diagnostico !== filters.diagnostico) return false;
+      if (filters.convenio !== 'todos' && p.convenio !== filters.convenio) return false;
+      if (filters.tratamento !== 'todos' && p.tratamento !== filters.tratamento) return false;
+      if (filters.status !== 'todos' && p.status !== filters.status) return false;
+      return true;
+    });
+    const val = (p) => {
+      if (sort.key === 'consultas') return (p.consultas||[]).length;
+      return (p[sort.key] || '').toString().toLowerCase();
+    };
+    const mul = sort.dir === 'asc' ? 1 : -1;
+    return list.sort((a,b) => {
+      const va = val(a), vb = val(b);
+      const cmp = typeof va === 'number' ? va - vb : va.localeCompare(vb, 'pt-BR');
+      return cmp !== 0 ? cmp * mul : a.nome.localeCompare(b.nome, 'pt-BR');
+    });
+  }, [patients, search, filters, sort]);
+
+  // Clique no cabeçalho: mesmo campo inverte direção; campo novo começa asc (data e nº começam desc)
+  const toggleSort = (key) => setSort(s =>
+    s.key === key ? {key, dir: s.dir === 'asc' ? 'desc' : 'asc'}
+                  : {key, dir: (key === 'ultimaConsulta' || key === 'consultas') ? 'desc' : 'asc'});
 
   const stats = useMemo(() => {
     const t = today(); const dx={}, conv={};
@@ -470,9 +509,26 @@ function App() {
 
   const charts = useMemo(() => {
     const tally = k => { const m={}; filtered.forEach(p=>{const v=p[k]||'—'; m[v]=(m[v]||0)+1;}); return Object.entries(m).map(([n,v])=>({name:n,value:v})).sort((a,b)=>b.value-a.value); };
-    const months = {};
-    filtered.forEach(p => (p.consultas||[]).forEach(c => { if(c.data){const k=c.data.slice(0,7); months[k]=(months[k]||0)+1;} }));
-    return { dx:tally('diagnostico'), conv:tally('convenio'), trat:tally('tratamento'), mes:Object.entries(months).sort().map(([n,v])=>({name:n,value:v})) };
+    const months = {}, weeks = {};
+    // Segunda-feira (ISO) da semana de uma data YYYY-MM-DD
+    const mondayOf = (iso) => {
+      const d = new Date(iso + 'T00:00:00');
+      const day = d.getDay();                 // 0=dom … 6=sáb
+      d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+      const mm = String(d.getMonth()+1).padStart(2,'0');
+      const dd = String(d.getDate()).padStart(2,'0');
+      return { key: `${d.getFullYear()}-${mm}-${dd}`, label: `${dd}/${mm}` };
+    };
+    filtered.forEach(p => (p.consultas||[]).forEach(c => {
+      if (!c.data) return;
+      const mk = c.data.slice(0,7); months[mk] = (months[mk]||0)+1;
+      const w = mondayOf(c.data); weeks[w.key] = weeks[w.key] || { label: w.label, value: 0 }; weeks[w.key].value++;
+    }));
+    return {
+      dx:tally('diagnostico'), conv:tally('convenio'), trat:tally('tratamento'),
+      mes:Object.entries(months).sort().map(([n,v])=>({name:n,value:v})),
+      semana:Object.keys(weeks).sort().map(k=>({name:weeks[k].label, value:weeks[k].value})),
+    };
   }, [filtered]);
 
   const activePatient = patients.find(p => p.id === activeId);
@@ -602,8 +658,13 @@ function App() {
                 <div style={{overflowX:'auto'}}>
                   <table>
                     <thead><tr>
-                      <th>Paciente</th><th>Diagnóstico</th><th>Convênio</th>
-                      <th>Tratamento</th><th>Status</th><th>Última consulta</th><th>Consultas</th><th style={{width:72}}></th>
+                      {[['nome','Paciente'],['diagnostico','Diagnóstico'],['convenio','Convênio'],['tratamento','Tratamento'],['status','Status'],['ultimaConsulta','Última consulta'],['consultas','Consultas']].map(([key,lbl])=>(
+                        <th key={key} onClick={()=>toggleSort(key)} style={{cursor:'pointer',userSelect:'none',whiteSpace:'nowrap'}} title="Ordenar">
+                          {lbl}
+                          <span style={{marginLeft:4,fontSize:9,color:sort.key===key?'var(--ink)':'var(--border)'}}>{sort.key===key?(sort.dir==='asc'?'▲':'▼'):'⇅'}</span>
+                        </th>
+                      ))}
+                      <th style={{width:72}}></th>
                     </tr></thead>
                     <tbody>
                       {filtered.map(p=>(
@@ -639,18 +700,44 @@ function App() {
 
           {tab === 'graficos' && (
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
-              <ChartCard title="Diagnósticos" icon="Stethoscope">
-                {charts.dx.length ? (
-                  <ResponsiveContainer width="100%" height={240}>
-                    <PieChart>
-                      <Pie data={charts.dx} dataKey="value" nameKey="name" cx="40%" cy="50%" outerRadius={80} innerRadius={40} paddingAngle={2}>
-                        {charts.dx.map((_,i)=><Cell key={i} fill={PAL[i%PAL.length]} stroke="white" strokeWidth={2}/>)}
-                      </Pie>
-                      <Tooltip contentStyle={{fontSize:12,border:'1px solid var(--border)'}}/>
-                      <Recharts.Legend layout="vertical" align="right" verticalAlign="middle" wrapperStyle={{fontSize:11}}/>
-                    </PieChart>
-                  </ResponsiveContainer>
-                ) : <Empty/>}
+              <ChartCard title="Diagnósticos" icon="Stethoscope"
+                action={hiddenDx.length>0 && (
+                  <button onClick={()=>setHiddenDx([])} style={{fontSize:11,padding:'3px 8px',borderRadius:6,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--muted)',cursor:'pointer'}}>
+                    Mostrar todos
+                  </button>
+                )}>
+                {charts.dx.length ? (() => {
+                  const dxColor = (name) => PAL[charts.dx.findIndex(d=>d.name===name) % PAL.length];
+                  const shown = charts.dx.filter(d => !hiddenDx.includes(d.name));
+                  const toggleDx = (name) => setHiddenDx(h => h.includes(name) ? h.filter(x=>x!==name) : [...h, name]);
+                  return (
+                  <div style={{display:'flex',alignItems:'center',gap:8}}>
+                    <div style={{flex:'0 0 55%'}}>
+                      <ResponsiveContainer width="100%" height={240}>
+                        <PieChart>
+                          <Pie data={shown} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} innerRadius={40} paddingAngle={2}>
+                            {shown.map((d,i)=><Cell key={i} fill={dxColor(d.name)} stroke="white" strokeWidth={2}/>)}
+                          </Pie>
+                          <Tooltip contentStyle={{fontSize:12,border:'1px solid var(--border)'}}/>
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div style={{flex:1,maxHeight:240,overflowY:'auto',display:'flex',flexDirection:'column',gap:2,paddingRight:4}}>
+                      {charts.dx.map(d=>{
+                        const off = hiddenDx.includes(d.name);
+                        return (
+                          <button key={d.name} onClick={()=>toggleDx(d.name)} title={off?'Clique para mostrar':'Clique para ocultar'}
+                            style={{display:'flex',alignItems:'center',gap:6,padding:'3px 6px',borderRadius:6,border:'none',background:'transparent',cursor:'pointer',textAlign:'left',width:'100%',opacity:off?0.4:1}}>
+                            <span style={{width:10,height:10,borderRadius:3,flexShrink:0,background:off?'transparent':dxColor(d.name),border:`2px solid ${dxColor(d.name)}`}}/>
+                            <span style={{fontSize:11,flex:1,textDecoration:off?'line-through':'none',color:'var(--ink)'}}>{d.name}</span>
+                            <span className="mono" style={{fontSize:11,color:'var(--muted)'}}>{d.value}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  );
+                })() : <Empty/>}
               </ChartCard>
               <ChartCard title="Convênios" icon="Building">
                 {charts.conv.length ? (
@@ -678,14 +765,24 @@ function App() {
                   </ResponsiveContainer>
                 ) : <Empty/>}
               </ChartCard>
-              <ChartCard title="Consultas por mês" icon="Activity">
-                {charts.mes.length ? (
+              <ChartCard title={consultaPeriod==='mes'?'Consultas por mês':'Consultas por semana'} icon="Activity"
+                action={
+                  <div style={{display:'flex',gap:2,background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8,padding:2}}>
+                    {[['mes','Mês'],['semana','Semana']].map(([v,lbl])=>(
+                      <button key={v} onClick={()=>setConsultaPeriod(v)} style={{
+                        fontSize:11,padding:'3px 10px',borderRadius:6,border:'none',cursor:'pointer',
+                        background:consultaPeriod===v?'var(--ink)':'transparent',color:consultaPeriod===v?'white':'var(--muted)',
+                        fontWeight:consultaPeriod===v?600:400,transition:'all .15s'}}>{lbl}</button>
+                    ))}
+                  </div>
+                }>
+                {(consultaPeriod==='mes'?charts.mes:charts.semana).length ? (
                   <ResponsiveContainer width="100%" height={240}>
-                    <LineChart data={charts.mes}>
+                    <LineChart data={consultaPeriod==='mes'?charts.mes:charts.semana}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)"/>
                       <XAxis dataKey="name" tick={{fontSize:11,fill:'var(--muted)'}}/>
-                      <YAxis tick={{fontSize:11,fill:'var(--muted)'}}/>
-                      <Tooltip contentStyle={{fontSize:12,border:'1px solid var(--border)'}}/>
+                      <YAxis tick={{fontSize:11,fill:'var(--muted)'}} allowDecimals={false}/>
+                      <Tooltip contentStyle={{fontSize:12,border:'1px solid var(--border)'}} labelFormatter={l=>consultaPeriod==='semana'?`Semana de ${l}`:l}/>
                       <Line type="monotone" dataKey="value" stroke="var(--accent)" strokeWidth={2} dot={{fill:'var(--accent)',r:4}}/>
                     </LineChart>
                   </ResponsiveContainer>
@@ -864,10 +961,11 @@ function ImportModal({ apiKey, onDone, onClose, onNeedKey }) {
         let src = file;
         if (isHeic(file)) {
           try {
-            const out = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 });
-            src = Array.isArray(out) ? out[0] : out;
+            src = await HeicTo({ blob: file, type: 'image/jpeg', quality: 0.92 });
           } catch (err) {
-            throw new Error('Falha ao converter HEIC: ' + file.name);
+            console.error('HeicTo falhou em', file.name, err);
+            const msg = (err && (err.message || err.code)) || String(err);
+            throw new Error('Falha ao converter HEIC: ' + file.name + (msg ? ' (' + msg + ')' : ''));
           }
         }
         return new Promise((res, rej) => {
@@ -1090,12 +1188,13 @@ function StatCard({ icon, label, value, sub, tint, text }) {
     </div>
   );
 }
-function ChartCard({ title, icon, children }) {
+function ChartCard({ title, icon, children, action }) {
   return (
     <div className="card" style={{padding:16}}>
       <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:12}}>
         <span style={{color:'var(--muted)'}}><I n={icon} s={12}/></span>
         <span className="eyebrow">{title}</span>
+        {action && <div style={{marginLeft:'auto'}}>{action}</div>}
       </div>
       {children}
     </div>
