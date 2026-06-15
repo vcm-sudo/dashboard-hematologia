@@ -12,6 +12,7 @@
 <script src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
 <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <style>
 :root {
   --ink:#1A1F2C; --muted:#6B7280; --surface:#FFFFFF; --bg:#F7F4EF;
@@ -857,25 +858,38 @@ function ImportModal({ apiKey, onDone, onClose, onNeedKey }) {
     setLoading(true); setError('');
     setLoadMsg(`Processando ${files.length} imagem(ns)…`);
     try {
-      const convertToJpeg = (file) => new Promise((res, rej) => {
-        const reader = new FileReader();
-        reader.onerror = () => rej(new Error('Erro ao ler ' + file.name));
-        reader.onload = (e) => {
-          const img = new Image();
-          img.onerror = () => rej(new Error('Formato não suportado: ' + file.name));
-          img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const max = 2400; let w = img.width, h = img.height;
-            if (w > max || h > max) { if (w > h) { h = Math.round(h*max/w); w=max; } else { w=Math.round(w*max/h); h=max; } }
-            canvas.width = w; canvas.height = h;
-            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-            res({ b64: dataUrl.split(',')[1], mt: 'image/jpeg' });
+      const isHeic = (f) => /image\/(heic|heif)/i.test(f.type) || /\.(heic|heif)$/i.test(f.name);
+      const convertToJpeg = async (file) => {
+        // O Chrome não decodifica HEIC via <img>; converte para JPEG antes.
+        let src = file;
+        if (isHeic(file)) {
+          try {
+            const out = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 });
+            src = Array.isArray(out) ? out[0] : out;
+          } catch (err) {
+            throw new Error('Falha ao converter HEIC: ' + file.name);
+          }
+        }
+        return new Promise((res, rej) => {
+          const reader = new FileReader();
+          reader.onerror = () => rej(new Error('Erro ao ler ' + file.name));
+          reader.onload = (e) => {
+            const img = new Image();
+            img.onerror = () => rej(new Error('Formato não suportado: ' + file.name));
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              const max = 2400; let w = img.width, h = img.height;
+              if (w > max || h > max) { if (w > h) { h = Math.round(h*max/w); w=max; } else { w=Math.round(w*max/h); h=max; } }
+              canvas.width = w; canvas.height = h;
+              canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+              const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+              res({ b64: dataUrl.split(',')[1], mt: 'image/jpeg' });
+            };
+            img.src = e.target.result;
           };
-          img.src = e.target.result;
-        };
-        reader.readAsDataURL(file);
-      });
+          reader.readAsDataURL(src);
+        });
+      };
       setLoadMsg(`Convertendo imagens…`);
       const converted = await Promise.all(files.map(convertToJpeg));
       setLoadMsg(`Enviando ${files.length} print(s) para Claude…`);
@@ -925,7 +939,7 @@ function ImportModal({ apiKey, onDone, onClose, onNeedKey }) {
               </>
             )}
           </div>
-          <input ref={fileRef} type="file" accept="image/*" multiple style={{display:'none'}} onChange={e=>{ const files=Array.from(e.target.files); if(files.length) processFiles(files); }}/>
+          <input ref={fileRef} type="file" accept="image/*,.heic,.heif" multiple style={{display:'none'}} onChange={e=>{ const files=Array.from(e.target.files); if(files.length) processFiles(files); }}/>
           {error && <div style={{background:'#FBEEF0',color:'var(--accent)',padding:'10px 14px',borderRadius:6,fontSize:13,marginBottom:12}}>{error}</div>}
         </>
       )}

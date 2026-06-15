@@ -14,7 +14,7 @@ hema        # terminal alias — starts server and opens Chrome
 
 Or manually:
 ```bash
-cd "/Users/viniciuscamposdemolla/pCloud Drive/_/Claude/Pacientes"
+cd "/Users/viniciuscamposdemolla/pCloud Drive/_/Claude/Dashboard Hemato"
 python3 -m http.server 8741
 # then open http://localhost:8741/dashboard-hematologia-v2.html in Chrome
 ```
@@ -23,16 +23,14 @@ python3 -m http.server 8741
 
 ## File locations
 
-| File | Purpose |
-|------|---------|
-| `Downloads/ClaudeCode/dashboard-hematologia-v2.html` | Working copy (edit here) |
-| `pCloud Drive/_/Claude/Pacientes/dashboard-hematologia-v2.html` | Served copy (must be kept in sync) |
-| `pCloud Drive/_/Claude/Pacientes/iniciar-dashboard.command` | Launch script |
-| `pCloud Drive/_/Claude/Pacientes/pacientes.json` | Auto-sync file written by the dashboard |
+All project files live in one folder:
 
-After editing the HTML, copy it to pCloud:
-```bash
-cp ~/Downloads/ClaudeCode/dashboard-hematologia-v2.html "/Users/viniciuscamposdemolla/pCloud Drive/_/Claude/Pacientes/"
+```
+pCloud Drive/_/Claude/Dashboard Hemato/
+├── dashboard-hematologia-v2.html   ← edit here
+├── iniciar-dashboard.command        ← double-click to launch
+├── pacientes.json                   ← auto-sync output (written by dashboard)
+└── CLAUDE.md
 ```
 
 ## Architecture
@@ -71,6 +69,31 @@ Everything lives in one `<script type="text/babel">` block inside the HTML file.
 - First use: user clicks the **pCloud Drive** button → `showDirectoryPicker` → handle stored in IDB → `fsGranted = true`
 - Subsequent page loads: `restoreFolder()` reads IDB handle and calls `queryPermission`. If `granted` → auto-save works silently. If `prompt` → button turns yellow ("Clique p/ sincronizar") until user clicks
 - Save target: always `pacientes.json` (overwritten, not dated backups)
+
+## Valid status values (`STATUS_OPTIONS`)
+
+```
+Em tratamento · Em investigação · Primeira consulta · Seguimento
+Remissão · Recidiva · Pré-TMO · Pós-TMO · Cuidados paliativos · Alta
+```
+
+Each maps to a colour pair in `SC` (background, text). Adding a new status requires an entry in `SC`.
+
+## Git workflow
+
+Repository: **https://github.com/vcm-sudo/dashboard-hematologia**
+
+The `hema` alias is defined in `~/.zshrc`. On a new machine, add it manually:
+```bash
+echo 'alias hema='"'"'open "/Users/viniciuscamposdemolla/pCloud Drive/_/Claude/Dashboard Hemato/iniciar-dashboard.command"'"'"'' >> ~/.zshrc
+```
+
+After editing the HTML, commit and push:
+```bash
+git add dashboard-hematologia-v2.html
+git commit -m "descrição da mudança"
+git push
+```
 
 ## Restoring data between browsers/machines
 
