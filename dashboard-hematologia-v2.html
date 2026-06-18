@@ -6,13 +6,16 @@
 <title>Painel de Pacientes · Hematologia</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdn.tailwindcss.com"></script>
-<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
-<script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.7/babel.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/heic-to@1.5.2/dist/iife/heic-to.js"></script>
+<!-- Scripts auto-hospedados em ./vendor/ — funcionam offline e não dependem de CDNs externas.
+     Versões: react/react-dom 18, prop-types 15, recharts 2.12.7, @babel/standalone 7.29.7, heic-to 1.5.2,
+     tailwindcss (play CDN runtime). Para atualizar, rebaixe o arquivo correspondente em vendor/. -->
+<script src="./vendor/tailwind.js"></script>
+<script src="./vendor/react.production.min.js"></script>
+<script src="./vendor/react-dom.production.min.js"></script>
+<script src="./vendor/prop-types.min.js"></script>
+<script src="./vendor/Recharts.js"></script>
+<script src="./vendor/babel.min.js"></script>
+<script src="./vendor/heic-to.js"></script>
 <style>
 :root {
   --ink:#1A1F2C; --muted:#6B7280; --surface:#FFFFFF; --bg:#F7F4EF;
@@ -1216,6 +1219,42 @@ function Modal({ title, children, onClose, wide }) {
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+
+<!-- Guarda de tela branca: roda fora do Babel, então funciona mesmo se a transpilação falhar.
+     Se o #root continuar vazio após alguns segundos, mostra um aviso em vez de uma tela branca muda. -->
+<script>
+(function () {
+  function checkRender() {
+    var root = document.getElementById('root');
+    if (root && root.children.length > 0) return; // app montou normalmente
+
+    var missing = [];
+    if (typeof React === 'undefined') missing.push('React');
+    if (typeof ReactDOM === 'undefined') missing.push('ReactDOM');
+    if (typeof Recharts === 'undefined') missing.push('Recharts');
+    if (typeof Babel === 'undefined') missing.push('Babel');
+    var detail = missing.length
+      ? 'Scripts que não carregaram: ' + missing.join(', ') + '.'
+      : 'Os scripts carregaram, mas o app não montou (provável erro de transpilação/JSX).';
+
+    root.innerHTML =
+      '<div style="max-width:560px;margin:80px auto;padding:24px 28px;font-family:system-ui,sans-serif;' +
+      'border:1px solid #E5E0D8;border-radius:8px;background:#fff;color:#1A1F2C;line-height:1.5">' +
+      '<h1 style="font-size:18px;margin-bottom:10px">O painel não carregou</h1>' +
+      '<p style="color:#6B7280;font-size:14px;margin-bottom:12px">' + detail + '</p>' +
+      '<p style="font-size:14px;margin-bottom:8px"><b>Tente:</b></p>' +
+      '<ol style="font-size:14px;color:#1A1F2C;padding-left:20px;margin-bottom:12px">' +
+      '<li>Recarregar sem cache: <b>Cmd+Shift+R</b></li>' +
+      '<li>Confirmar que os arquivos em <code>vendor/</code> existem ao lado do HTML</li>' +
+      '<li>Abrir o console (<b>Cmd+Option+J</b>) e ver as linhas em vermelho</li>' +
+      '</ol>' +
+      '<p style="font-size:12px;color:#6B7280">Seus dados não foram perdidos — ficam salvos no navegador (localStorage) e no pacientes.json.</p>' +
+      '</div>';
+  }
+  // Dá tempo de o Babel transpilar e o React montar antes de decidir que falhou.
+  window.addEventListener('load', function () { setTimeout(checkRender, 4000); });
+})();
 </script>
 </body>
 </html>

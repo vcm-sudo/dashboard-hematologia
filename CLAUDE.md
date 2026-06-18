@@ -6,6 +6,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Single-file HTML dashboard for managing hematology patients at Hospital 9 de Julho. Built with React 18 (via CDN + Babel standalone), TailwindCSS, and Recharts — no build step, no package.json.
 
+The entire app is transpiled in-browser by Babel standalone on every load, so **any edit requires a hard reload (Cmd+Shift+R) to take effect** — a normal reload reuses the cached, already-transpiled bundle.
+
+### Dependencies — self-hosted in `vendor/` (NOT loaded from CDNs)
+
+All runtime scripts are vendored locally and loaded with relative `./vendor/...` paths from `<head>`: React 18 + ReactDOM, prop-types 15, Recharts 2.12.7, `@babel/standalone@7.29.7`, `heic-to@1.5.2` (IIFE build, global `HeicTo`), and the Tailwind play-CDN runtime (`tailwind.js`). The app therefore runs fully offline and does not depend on unpkg/jsdelivr/`cdn.tailwindcss.com` being up or serving the expected bytes. `heic-to` replaced `heic2any`, which failed on modern iPhone HEIC files with `ERR_LIBHEIF format not supported`.
+
+**Why vendored (do not revert to CDNs):** the scripts used to load from unpkg/jsdelivr unversioned. When unpkg's `@babel/standalone` `latest` rolled to **Babel 8**, `@babel/preset-react` switched to the automatic JSX runtime and emitted `import { jsx } from "react/jsx-runtime"` — an `import` can't run inside a classic `<script>`, so the whole page rendered blank with `Uncaught SyntaxError: Cannot use import statement outside a module`. (Misleading symptom: the console points the error at a `<style>`/CSS line, because Babel reports the injected script's position, not the real source.) `cdn.tailwindcss.com` carried the same latent risk. Vendoring eliminates this entire failure class. **To update a dependency, re-download that single file into `vendor/`** — keep React and ReactDOM on the same major, and re-check JSX still transpiles if bumping Babel across a major.
+
+Only the Google Fonts `<link>` remains external; it degrades gracefully to system fonts (`Inter`/`Instrument Serif`/`JetBrains Mono` → `system-ui`/`Georgia`/`monospace`) and never blanks the page.
+
+**Blank-page guard:** a plain (non-Babel) `<script>` at the end of `<body>` checks 4s after `load` whether `#root` is still empty; if so it replaces the white screen with an on-page diagnostic (which scripts failed to load, hard-reload hint, console hint) instead of a silent blank — important because a blank page in a clinical tool could be misread as "no patients" rather than "broken."
+
 ## Running the dashboard
 
 ```bash
@@ -28,6 +40,7 @@ All project files live in one folder:
 ```
 pCloud Drive/_/Claude/Dashboard Hemato/
 ├── dashboard-hematologia-v2.html   ← edit here
+├── vendor/                          ← self-hosted JS libs (react, babel, recharts, tailwind, heic-to…)
 ├── iniciar-dashboard.command        ← double-click to launch
 ├── pacientes.json                   ← auto-sync output (written by dashboard)
 └── CLAUDE.md
@@ -41,8 +54,10 @@ Everything lives in one `<script type="text/babel">` block inside the HTML file.
 - **IndexedDB** — persists the File System Access directory handle across page reloads (`hema_fs_v1` DB, `handles` store, key `sync_dir`)
 - **File System Access** — `_dirHandle` (active, permission granted) and `_pendingHandle` (stored in IDB but needs a user gesture to re-authorize). `pickFolder()` stores the handle in IDB; `restoreFolder()` tries to recover it silently on mount
 - **Auto-sync** — `useEffect` on `patients` state: 2-second debounce → `saveToFolder()` → writes `pacientes.json` in the selected folder. If `_dirHandle` is null but `_pendingHandle` exists, sets `syncPending=true` and waits for a user click
+- **Image import** — `ImportModal.processFiles()` → `convertToJpeg()`. HEIC/HEIF files are decoded with `HeicTo({blob, type:'image/jpeg'})` **before** being drawn to a canvas (Chrome can't decode HEIC via `<img>`); all images are then downscaled (max 2400px) and re-encoded as JPEG. The browser-side resize is what keeps the base64 payload small enough for the API
 - **Claude Vision** — `extractPatientsFromImage()` calls `api.anthropic.com/v1/messages` directly from the browser (requires `anthropic-dangerous-direct-browser-access: true` header) using `claude-sonnet-4-6`
-- **State** — all app state in `App()`: `patients`, `fsGranted`, `syncPending`, `lastSync`, `fsSaving`, `view` (list | patient), `tab` (lista | graficos)
+- **State** — all app state in `App()`: `patients`, `fsGranted`, `syncPending`, `lastSync`, `fsSaving`, `view` (list | patient), `tab` (lista | graficos), `sort` (`{key, dir}` for the patient table), `consultaPeriod` (`mes` | `semana` toggle on the consultations chart), `hiddenDx` (diagnoses hidden from the donut via its clickable legend)
+- **Charts** (`charts` useMemo, derived from `filtered`) — `dx`/`conv`/`trat` tallies plus `mes` and `semana` (consultas grouped by ISO-week Monday). The diagnoses donut colours are keyed to the full `charts.dx` index so hiding a slice doesn't reshuffle colours
 
 ## Patient data shape
 
@@ -69,6 +84,7 @@ Everything lives in one `<script type="text/babel">` block inside the HTML file.
 - First use: user clicks the **pCloud Drive** button → `showDirectoryPicker` → handle stored in IDB → `fsGranted = true`
 - Subsequent page loads: `restoreFolder()` reads IDB handle and calls `queryPermission`. If `granted` → auto-save works silently. If `prompt` → button turns yellow ("Clique p/ sincronizar") until user clicks
 - Save target: always `pacientes.json` (overwritten, not dated backups)
+- **Stale-handle recovery**: pCloud is a virtual drive that remounts, which can leave the stored handle pointing at a path that no longer exists. `saveToFS()` catches `NotFoundError` and, when triggered by a user click (not the silent auto-save), clears the handle and re-opens `showDirectoryPicker` so the user can re-select the folder. localStorage remains the source of truth, so a sync failure never loses data
 
 ## Valid status values (`STATUS_OPTIONS`)
 
@@ -94,6 +110,8 @@ git add dashboard-hematologia-v2.html
 git commit -m "descrição da mudança"
 git push
 ```
+
+**Never stage `pacientes.json`.** It is the auto-sync output and contains real patient data (PHI). The HTML, `vendor/`, and `CLAUDE.md` are the tracked source. `.DS_Store` and `pacientes.json` were already committed in earlier history; if the repo is public this is a privacy exposure worth flagging.
 
 ## Restoring data between browsers/machines
 
