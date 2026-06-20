@@ -984,6 +984,7 @@ function ImportModal({ apiKey, onDone, onClose, onNeedKey }) {
   const [loading, setLoading]     = useState(false);
   const [loadMsg, setLoadMsg]     = useState('');
   const [extracted, setExtracted] = useState([]);
+  const [batchDate, setBatchDate] = useState(today());
   const [error, setError]         = useState('');
   const fileRef = useRef();
 
@@ -1082,6 +1083,12 @@ function ImportModal({ apiKey, onDone, onClose, onNeedKey }) {
         <>
           <div style={{background:'#EAF1EC',color:'#2D5F38',padding:'8px 14px',borderRadius:6,marginBottom:14,fontSize:13,display:'flex',gap:6,alignItems:'center'}}>
             <I n="Check" s={13}/> {extracted.length} paciente(s) extraído(s). Revise antes de importar.
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14,flexWrap:'wrap'}}>
+            <label className="label" style={{margin:0}}>Data da consulta</label>
+            <input className="input" type="date" value={batchDate} style={{width:160}}
+              onChange={e=>{ const d=e.target.value; setBatchDate(d); setExtracted(prev=>prev.map(r=>({...r,data:d}))); }}/>
+            <span style={{fontSize:12,color:'var(--muted)'}}>aplica a todas as linhas — ajuste abaixo se alguma for de outro dia</span>
           </div>
           <div style={{overflowX:'auto',marginBottom:16}}>
             <table>
