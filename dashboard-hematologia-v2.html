@@ -43,6 +43,9 @@ th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.08em;
 td{padding:12px 12px;font-size:13px;border-bottom:1px solid var(--border);vertical-align:middle}
 tr:last-child td{border-bottom:none}
 .row-hover:hover td{background:#FAF6EF;cursor:pointer}
+/* Foco visível por teclado nos elementos interativos (linha clicável, cabeçalho ordenável, botões) */
+.row-hover:focus-visible,th[role="button"]:focus-visible,.btn:focus-visible{outline:2px solid var(--accent2);outline-offset:-2px}
+.row-hover:focus-visible td:first-child{box-shadow:inset 3px 0 0 var(--accent2)}
 .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:500}
 ::placeholder{color:#C0B8AE}
 textarea.input{resize:vertical}
@@ -160,7 +163,9 @@ const fmtDate = (d) => d ? d.split('-').reverse().join('/') : '—';
 const fmtHM = (d) => d ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : '';
 
 // ─── SVG Icons ────────────────────────────────────────────
-const Ic = ({p, s=14, ...rest}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>{p}</svg>;
+// Ícones são decorativos por padrão (aria-hidden) — quem rotula é o botão/elemento que os contém.
+// Um chamador pode sobrescrever passando aria-hidden={false} via ...rest.
+const Ic = ({p, s=14, ...rest}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false" {...rest}>{p}</svg>;
 const Icons = {
   Search:   <><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></>,
   Plus:     <><path d="M12 5v14M5 12h14"/></>,
@@ -626,17 +631,17 @@ function App() {
             <div className="card" style={{padding:16,marginBottom:16}}>
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:10}}>
                 <div>
-                  <label className="label">Buscar</label>
+                  <label className="label" htmlFor="f-busca">Buscar</label>
                   <div style={{position:'relative'}}>
                     <span style={{position:'absolute',left:10,top:10,color:'var(--muted)',pointerEvents:'none'}}><I n="Search"/></span>
-                    <input className="input" style={{paddingLeft:32}} placeholder="Nome…" value={search} onChange={e=>setSearch(e.target.value)}/>
+                    <input id="f-busca" name="busca" type="search" autoComplete="off" className="input" style={{paddingLeft:32}} placeholder="Nome…" value={search} onChange={e=>setSearch(e.target.value)}/>
                   </div>
                 </div>
                 {[['diagnostico','Diagnóstico'],['convenio','Convênio'],['tratamento','Tratamento'],['terapia','Terapia celular'],['status','Status']].map(([k,lbl])=>(
                   <div key={k}>
-                    <label className="label">{lbl}</label>
+                    <label className="label" htmlFor={`f-${k}`}>{lbl}</label>
                     <div style={{position:'relative'}}>
-                      <select className="select" style={{appearance:'none',paddingRight:28}} value={filters[k]} onChange={e=>setFilters({...filters,[k]:e.target.value})}>
+                      <select id={`f-${k}`} name={k} className="select" style={{appearance:'none',paddingRight:28}} value={filters[k]} onChange={e=>setFilters({...filters,[k]:e.target.value})}>
                         <option value="todos">{k==='terapia'?'Todas':'Todos'}</option>
                         {(k==='terapia'?TERAPIAS_OPTIONS:uniq(k)).map(o=><option key={o} value={o}>{o}</option>)}
                       </select>
@@ -675,7 +680,11 @@ function App() {
                   <table>
                     <thead><tr>
                       {[['nome','Paciente'],['diagnostico','Diagnóstico'],['convenio','Convênio'],['tratamento','Tratamento'],['status','Status'],['ultimaConsulta','Última consulta'],['consultas','Consultas']].map(([key,lbl])=>(
-                        <th key={key} onClick={()=>toggleSort(key)} style={{cursor:'pointer',userSelect:'none',whiteSpace:'nowrap'}} title="Ordenar">
+                        <th key={key} onClick={()=>toggleSort(key)}
+                          onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); toggleSort(key); } }}
+                          tabIndex={0} role="button" aria-label={`Ordenar por ${lbl}`}
+                          aria-sort={sort.key===key ? (sort.dir==='asc'?'ascending':'descending') : 'none'}
+                          style={{cursor:'pointer',userSelect:'none',whiteSpace:'nowrap'}} title="Ordenar">
                           {lbl}
                           <span style={{marginLeft:4,fontSize:9,color:sort.key===key?'var(--ink)':'var(--border)'}}>{sort.key===key?(sort.dir==='asc'?'▲':'▼'):'⇅'}</span>
                         </th>
@@ -684,7 +693,9 @@ function App() {
                     </tr></thead>
                     <tbody>
                       {filtered.map(p=>(
-                        <tr key={p.id} className="row-hover" onClick={()=>{setActiveId(p.id);setView('patient');}}>
+                        <tr key={p.id} className="row-hover" tabIndex={0} role="button" aria-label={`Abrir ficha de ${p.nome}`}
+                          onClick={()=>{setActiveId(p.id);setView('patient');}}
+                          onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); setActiveId(p.id); setView('patient'); } }}>
                           <td>
                             <div style={{fontWeight:600,fontSize:13}}>{p.nome}</div>
                             {p.prontuario && <div className="mono" style={{fontSize:10,color:'var(--muted)',marginTop:2}}>#{p.prontuario}</div>}
@@ -870,7 +881,7 @@ function App() {
       {showKey && <ApiKeyModal apiKey={apiKey} onSave={(k)=>{saveKey(k);setApiKey(k);setShowKey(false);msg('Claude API Key salva');}} onClose={()=>setShowKey(false)}/>}
 
       {toast && (
-        <div style={{
+        <div role="status" aria-live="polite" aria-atomic="true" style={{
           position:'fixed',bottom:24,right:24,
           background:toast.type==='err'?'#7B1F2E':'var(--ink)',
           color:'white',padding:'10px 16px',borderRadius:6,fontSize:13,
@@ -908,7 +919,7 @@ function PatientDetail({ patient, onEdit, onDelete, onAddConsulta, onEditConsult
           </div>
           <div style={{display:'flex',gap:8}}>
             <button className="btn btn-secondary" onClick={onEdit}><I n="Edit" s={13}/> Editar</button>
-            <button className="btn btn-ghost" style={{color:'var(--accent)'}} onClick={()=>{if(confirm('Remover este paciente?'))onDelete();}}><I n="Trash" s={13}/></button>
+            <button className="btn btn-ghost" style={{color:'var(--accent)'}} aria-label="Remover paciente" title="Remover paciente" onClick={()=>{if(confirm('Remover este paciente?'))onDelete();}}><I n="Trash" s={13}/></button>
           </div>
         </div>
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:16,marginTop:20}}>
@@ -1085,8 +1096,8 @@ function ImportModal({ apiKey, onDone, onClose, onNeedKey }) {
             <I n="Check" s={13}/> {extracted.length} paciente(s) extraído(s). Revise antes de importar.
           </div>
           <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14,flexWrap:'wrap'}}>
-            <label className="label" style={{margin:0}}>Data da consulta</label>
-            <input className="input" type="date" value={batchDate} style={{width:160}}
+            <label className="label" htmlFor="im-batchdate" style={{margin:0}}>Data da consulta</label>
+            <input id="im-batchdate" name="batchDate" className="input" type="date" value={batchDate} style={{width:160}}
               onChange={e=>{ const d=e.target.value; setBatchDate(d); setExtracted(prev=>prev.map(r=>({...r,data:d}))); }}/>
             <span style={{fontSize:12,color:'var(--muted)'}}>aplica a todas as linhas — ajuste abaixo se alguma for de outro dia</span>
           </div>
@@ -1096,12 +1107,12 @@ function ImportModal({ apiKey, onDone, onClose, onNeedKey }) {
               <tbody>
                 {extracted.map((r,i)=>(
                   <tr key={i}>
-                    <td><input className="input" value={r.nome||''} onChange={e=>editRow(i,'nome',e.target.value)} style={{minWidth:200}}/></td>
-                    <td><input className="input" value={r.prontuario||''} onChange={e=>editRow(i,'prontuario',e.target.value)} style={{width:90}}/></td>
-                    <td><input className="input" value={r.atendimento||''} onChange={e=>editRow(i,'atendimento',e.target.value)} style={{width:90}}/></td>
-                    <td><input className="input" type="date" value={r.data||today()} onChange={e=>editRow(i,'data',e.target.value)} style={{width:130}}/></td>
-                    <td><input className="input" type="time" value={r.hora||''} onChange={e=>editRow(i,'hora',e.target.value)} style={{width:90}}/></td>
-                    <td><button className="btn btn-ghost" style={{padding:5,color:'var(--accent)'}} onClick={()=>removeRow(i)}><I n="X" s={12}/></button></td>
+                    <td><input className="input" aria-label={`Nome (linha ${i+1})`} value={r.nome||''} onChange={e=>editRow(i,'nome',e.target.value)} style={{minWidth:200}}/></td>
+                    <td><input className="input" aria-label={`Prontuário (linha ${i+1})`} inputMode="numeric" value={r.prontuario||''} onChange={e=>editRow(i,'prontuario',e.target.value)} style={{width:90}}/></td>
+                    <td><input className="input" aria-label={`Atendimento (linha ${i+1})`} inputMode="numeric" value={r.atendimento||''} onChange={e=>editRow(i,'atendimento',e.target.value)} style={{width:90}}/></td>
+                    <td><input className="input" aria-label={`Data (linha ${i+1})`} type="date" value={r.data||today()} onChange={e=>editRow(i,'data',e.target.value)} style={{width:130}}/></td>
+                    <td><input className="input" aria-label={`Hora (linha ${i+1})`} type="time" value={r.hora||''} onChange={e=>editRow(i,'hora',e.target.value)} style={{width:90}}/></td>
+                    <td><button className="btn btn-ghost" style={{padding:5,color:'var(--accent)'}} aria-label="Remover esta linha" title="Remover linha" onClick={()=>removeRow(i)}><I n="X" s={12}/></button></td>
                   </tr>
                 ))}
               </tbody>
@@ -1132,31 +1143,32 @@ function PatientForm({ patient, onSave, onClose, existing }) {
   return (
     <Modal title={patient?.id ? 'Editar paciente' : 'Novo paciente'} onClose={onClose} wide>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        <div style={{gridColumn:'1/-1'}}><label className="label">Nome *</label><input className="input" value={f.nome} onChange={e=>set('nome',e.target.value)} autoFocus/></div>
-        <div><label className="label">Prontuário</label><input className="input" value={f.prontuario} onChange={e=>set('prontuario',e.target.value)}/></div>
-        <div><label className="label">Idade</label><input className="input" type="number" value={f.idade} onChange={e=>set('idade',e.target.value)}/></div>
+        <div style={{gridColumn:'1/-1'}}><label className="label" htmlFor="pf-nome">Nome *</label><input id="pf-nome" name="nome" autoComplete="off" spellCheck={false} className="input" value={f.nome} onChange={e=>set('nome',e.target.value)} autoFocus/></div>
+        <div><label className="label" htmlFor="pf-prontuario">Prontuário</label><input id="pf-prontuario" name="prontuario" inputMode="numeric" autoComplete="off" className="input" value={f.prontuario} onChange={e=>set('prontuario',e.target.value)}/></div>
+        <div><label className="label" htmlFor="pf-idade">Idade</label><input id="pf-idade" name="idade" className="input" type="number" inputMode="numeric" value={f.idade} onChange={e=>set('idade',e.target.value)}/></div>
         <div>
-          <label className="label">Diagnóstico</label>
-          <input className="input" list="dx-l" value={f.diagnostico} onChange={e=>set('diagnostico',e.target.value)} placeholder="Ex.: Mieloma Múltiplo"/>
+          <label className="label" htmlFor="pf-diagnostico">Diagnóstico</label>
+          <input id="pf-diagnostico" name="diagnostico" autoComplete="off" className="input" list="dx-l" value={f.diagnostico} onChange={e=>set('diagnostico',e.target.value)} placeholder="Ex.: Mieloma Múltiplo…"/>
           <datalist id="dx-l">{existing.diagnosticos.map(d=><option key={d} value={d}/>)}</datalist>
         </div>
         <div>
-          <label className="label">Convênio</label>
-          <input className="input" list="cv-l" value={f.convenio} onChange={e=>set('convenio',e.target.value)} placeholder="Ex.: Bradesco Saúde"/>
+          <label className="label" htmlFor="pf-convenio">Convênio</label>
+          <input id="pf-convenio" name="convenio" autoComplete="off" className="input" list="cv-l" value={f.convenio} onChange={e=>set('convenio',e.target.value)} placeholder="Ex.: Bradesco Saúde…"/>
           <datalist id="cv-l">{existing.convenios.map(d=><option key={d} value={d}/>)}</datalist>
         </div>
         <div style={{gridColumn:'1/-1'}}>
-          <label className="label">Tratamento</label>
-          <input className="input" list="tr-l" value={f.tratamento} onChange={e=>set('tratamento',e.target.value)} placeholder="Ex.: DRd, VRd, R-CHOP, ibrutinibe…"/>
+          <label className="label" htmlFor="pf-tratamento">Tratamento</label>
+          <input id="pf-tratamento" name="tratamento" autoComplete="off" className="input" list="tr-l" value={f.tratamento} onChange={e=>set('tratamento',e.target.value)} placeholder="Ex.: DRd, VRd, R-CHOP, ibrutinibe…"/>
           <datalist id="tr-l">{existing.tratamentos.map(d=><option key={d} value={d}/>)}</datalist>
         </div>
         <div style={{gridColumn:'1/-1'}}>
-          <label className="label">Terapia celular / transplante</label>
-          <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:2}}>
+          <span className="label" id="pf-terapias-label" style={{display:'block'}}>Terapia celular / transplante</span>
+          <div role="group" aria-labelledby="pf-terapias-label" style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:2}}>
             {TERAPIAS_OPTIONS.map(t=>{
               const on = f.terapias.includes(t);
               return (
                 <button key={t} type="button" onClick={()=>toggleTerapia(t)}
+                  aria-pressed={on} aria-label={t}
                   className="pill"
                   style={{cursor:'pointer',border:'1px solid '+(on?'transparent':'var(--border)'),fontWeight:on?600:400,...(on?terapiaPill(t):{background:'var(--bg)',color:'var(--muted)'})}}>
                   {on && '✓ '}{t}
@@ -1167,9 +1179,9 @@ function PatientForm({ patient, onSave, onClose, existing }) {
           <p style={{fontSize:11,color:'var(--muted)',marginTop:6}}>Marque todas que o paciente realizou (pode ser mais de uma).</p>
         </div>
         <div style={{gridColumn:'1/-1'}}>
-          <label className="label">Status</label>
+          <label className="label" htmlFor="pf-status">Status</label>
           <div style={{position:'relative'}}>
-            <select className="select" value={f.status} onChange={e=>set('status',e.target.value)} style={{appearance:'none',paddingRight:28}}>
+            <select id="pf-status" name="status" className="select" value={f.status} onChange={e=>set('status',e.target.value)} style={{appearance:'none',paddingRight:28}}>
               <option value="">—</option>
               {STATUS_OPTIONS.map(s=><option key={s} value={s}>{s}</option>)}
             </select>
@@ -1198,12 +1210,12 @@ function ConsultaForm({ consulta, onSave, onClose }) {
   return (
     <Modal title={consulta ? 'Editar consulta' : 'Registrar consulta'} onClose={onClose}>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        <div><label className="label">Data *</label><input className="input" type="date" value={f.data} onChange={e=>set('data',e.target.value)}/></div>
-        <div><label className="label">Horário</label><input className="input" type="time" value={f.hora} onChange={e=>set('hora',e.target.value)}/></div>
-        <div style={{gridColumn:'1/-1'}}><label className="label">Nº Atendimento</label><input className="input" value={f.atendimento} onChange={e=>set('atendimento',e.target.value)} placeholder="Ex.: 7037268"/></div>
-        <div><label className="label">Diagnóstico nesta consulta</label><input className="input" value={f.diagnostico} onChange={e=>set('diagnostico',e.target.value)}/></div>
-        <div><label className="label">Tratamento nesta consulta</label><input className="input" value={f.tratamento} onChange={e=>set('tratamento',e.target.value)}/></div>
-        <div style={{gridColumn:'1/-1'}}><label className="label">Observações</label><textarea className="input" rows={3} value={f.obs} onChange={e=>set('obs',e.target.value)} placeholder="Evolução, intercorrências, ajuste de dose…"/></div>
+        <div><label className="label" htmlFor="cf-data">Data *</label><input id="cf-data" name="data" className="input" type="date" value={f.data} onChange={e=>set('data',e.target.value)}/></div>
+        <div><label className="label" htmlFor="cf-hora">Horário</label><input id="cf-hora" name="hora" className="input" type="time" value={f.hora} onChange={e=>set('hora',e.target.value)}/></div>
+        <div style={{gridColumn:'1/-1'}}><label className="label" htmlFor="cf-atendimento">Nº Atendimento</label><input id="cf-atendimento" name="atendimento" inputMode="numeric" autoComplete="off" className="input" value={f.atendimento} onChange={e=>set('atendimento',e.target.value)} placeholder="Ex.: 7037268…"/></div>
+        <div><label className="label" htmlFor="cf-diagnostico">Diagnóstico nesta consulta</label><input id="cf-diagnostico" name="diagnostico" autoComplete="off" className="input" value={f.diagnostico} onChange={e=>set('diagnostico',e.target.value)}/></div>
+        <div><label className="label" htmlFor="cf-tratamento">Tratamento nesta consulta</label><input id="cf-tratamento" name="tratamento" autoComplete="off" className="input" value={f.tratamento} onChange={e=>set('tratamento',e.target.value)}/></div>
+        <div style={{gridColumn:'1/-1'}}><label className="label" htmlFor="cf-obs">Observações</label><textarea id="cf-obs" name="obs" className="input" rows={3} value={f.obs} onChange={e=>set('obs',e.target.value)} placeholder="Evolução, intercorrências, ajuste de dose…"/></div>
       </div>
       <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:20}}>
         <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
@@ -1224,8 +1236,8 @@ function ApiKeyModal({ apiKey, onSave, onClose }) {
         A extração automática de prints usa a API do Claude (Anthropic).<br/>
         Sua chave fica salva <strong>apenas no seu navegador</strong> (localStorage) e nunca é enviada para nenhum servidor além da Anthropic.
       </p>
-      <label className="label">Chave (começa com sk-ant-…)</label>
-      <input className="input mono" type="password" value={k} onChange={e=>setK(e.target.value)} placeholder="sk-ant-api03-…" style={{marginBottom:8}}/>
+      <label className="label" htmlFor="ak-chave">Chave (começa com sk-ant-…)</label>
+      <input id="ak-chave" name="apikey" autoComplete="off" spellCheck={false} className="input mono" type="password" value={k} onChange={e=>setK(e.target.value)} placeholder="sk-ant-api03-…" style={{marginBottom:8}}/>
       <p style={{fontSize:11,color:'var(--muted)',marginBottom:16}}>
         Obtenha em <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style={{color:'var(--accent2)'}}>console.anthropic.com/settings/keys</a>
       </p>
@@ -1264,12 +1276,39 @@ function ChartCard({ title, icon, children, action }) {
 }
 const Empty = () => <div style={{height:240,display:'flex',alignItems:'center',justifyContent:'center',color:'var(--muted)',fontSize:12}}>Sem dados</div>;
 function Modal({ title, children, onClose, wide }) {
+  const panelRef = useRef(null);
+  // Acessibilidade do diálogo: foco preso dentro do modal, Esc fecha, foco volta
+  // para quem abriu ao fechar. Respeita um autoFocus que já tenha caído num campo interno.
+  useEffect(() => {
+    const prevFocus = document.activeElement;
+    const panel = panelRef.current;
+    const focusables = () => panel
+      ? [...panel.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(el => el.offsetParent !== null)
+      : [];
+    // Só captura o foco se ele ainda não estiver dentro do modal (ex.: input com autoFocus).
+    if (panel && !panel.contains(document.activeElement)) panel.focus();
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); onClose(); return; }
+      if (e.key !== 'Tab') return;
+      const f = focusables();
+      if (!f.length) { e.preventDefault(); return; }
+      const i = f.indexOf(document.activeElement);
+      if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); }
+      else if (!e.shiftKey && (i === f.length - 1 || i === -1)) { e.preventDefault(); f[0].focus(); }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('keydown', onKey, true);
+      if (prevFocus && prevFocus.focus) prevFocus.focus();
+    };
+  }, []);
   return (
     <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(26,31,44,.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:50,padding:16}}>
-      <div onClick={e=>e.stopPropagation()} style={{background:'white',borderRadius:10,width:wide?740:520,maxWidth:'100%',maxHeight:'90vh',overflowY:'auto',boxShadow:'0 20px 60px rgba(0,0,0,.2)'}}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="modal-title" tabIndex={-1}
+        onClick={e=>e.stopPropagation()} style={{background:'white',borderRadius:10,width:wide?740:520,maxWidth:'100%',maxHeight:'90vh',overflowY:'auto',boxShadow:'0 20px 60px rgba(0,0,0,.2)'}}>
         <div style={{padding:'16px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',borderBottom:'1px solid var(--border)'}}>
-          <h3 className="serif" style={{fontSize:22}}>{title}</h3>
-          <button className="btn btn-ghost" style={{padding:6}} onClick={onClose}><I n="X" s={16}/></button>
+          <h3 id="modal-title" className="serif" style={{fontSize:22}}>{title}</h3>
+          <button className="btn btn-ghost" style={{padding:6}} aria-label="Fechar" title="Fechar" onClick={onClose}><I n="X" s={16}/></button>
         </div>
         <div style={{padding:20}}>{children}</div>
       </div>
