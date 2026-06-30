@@ -1,0 +1,7 @@
+# Dados de paciente — sincronizados via pCloud, NÃO versionados no GitHub.
+# O app persiste localmente (localStorage + pacientes.json na pasta pCloud);
+# o git fica só com o código do dashboard.
+pacientes.json
+
+# Ruído do macOS
+.DS_Store
