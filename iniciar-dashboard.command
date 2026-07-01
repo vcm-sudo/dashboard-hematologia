@@ -4,8 +4,8 @@ cd "$(dirname "$0")"
 # Mata qualquer servidor anterior na porta 8741
 lsof -ti:8741 | xargs kill -9 2>/dev/null
 
-# Inicia o servidor em background
-python3 -m http.server 8741 &
+# Inicia o servidor em background (serve os arquivos + extração de agenda via Claude CLI/assinatura)
+python3 servidor.py &
 SERVER_PID=$!
 
 # Aguarda o servidor subir

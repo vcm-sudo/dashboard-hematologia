@@ -5,3 +5,6 @@ pacientes.json
 
 # Ruído do macOS
 .DS_Store
+
+# Cache do Python (servidor.py)
+__pycache__/

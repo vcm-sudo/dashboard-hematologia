@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## What this project is
 
@@ -26,17 +26,17 @@ hema        # terminal alias — starts server and opens Chrome
 
 Or manually:
 ```bash
-cd "/Users/viniciuscamposdemolla/pCloud Drive/_/Claude/Dashboard Hemato"
+cd "/Users/viniciuscamposdemolla/pCloud Drive/_/Codex/Dashboard Hemato"
 python3 servidor.py
 # then open http://localhost:8741/dashboard-hematologia-v2.html in Chrome
 ```
 
 `servidor.py` replaces the plain `python3 -m http.server`: it still serves the static
 files, **and** exposes `POST /extrair-agenda`, the endpoint the dashboard calls to OCR an
-agenda screenshot. That endpoint shells out to the **Claude Code CLI (`claude`) on the
+agenda screenshot. That endpoint shells out to the **Codex CLI (`codex`) on the
 subscription** — the API-per-token path was removed. So the agenda-import feature now only
-works with `servidor.py` running on the Mac (where `claude` is installed and logged in);
-`claude` must be authenticated (run `claude` once and log in).
+works with `servidor.py` running on the Mac (where the CLI is installed and logged in);
+the CLI must be authenticated.
 
 **Chrome is required.** The pCloud sync uses the File System Access API (`showDirectoryPicker`), which is not supported in Safari.
 
@@ -45,13 +45,13 @@ works with `servidor.py` running on the Mac (where `claude` is installed and log
 All project files live in one folder:
 
 ```
-pCloud Drive/_/Claude/Dashboard Hemato/
+pCloud Drive/_/Codex/Dashboard Hemato/
 ├── dashboard-hematologia-v2.html   ← edit here
-├── servidor.py                      ← local server: static files + /extrair-agenda (Claude CLI)
+├── servidor.py                      ← local server: static files + /extrair-agenda (Codex CLI)
 ├── vendor/                          ← self-hosted JS libs (react, babel, recharts, tailwind, heic-to…)
 ├── iniciar-dashboard.command        ← double-click to launch
 ├── pacientes.json                   ← auto-sync output (written by dashboard)
-└── CLAUDE.md
+└── AGENTS.md
 ```
 
 ## Architecture
@@ -63,7 +63,7 @@ Everything lives in one `<script type="text/babel">` block inside the HTML file.
 - **File System Access** — `_dirHandle` (active, permission granted) and `_pendingHandle` (stored in IDB but needs a user gesture to re-authorize). `pickFolder()` stores the handle in IDB; `restoreFolder()` tries to recover it silently on mount
 - **Auto-sync** — `useEffect` on `patients` state: 2-second debounce → `saveToFolder()` → writes `pacientes.json` in the selected folder. If `_dirHandle` is null but `_pendingHandle` exists, sets `syncPending=true` and waits for a user click
 - **Image import** — `ImportModal.processFiles()` → `convertToJpeg()`. HEIC/HEIF files are decoded with `HeicTo({blob, type:'image/jpeg'})` **before** being drawn to a canvas (Chrome can't decode HEIC via `<img>`); all images are then downscaled (max 2400px) and re-encoded as JPEG. The browser-side resize is what keeps the base64 payload small enough for the API
-- **Claude Vision** — `extractPatientsFromImage()` POSTs the JPEG (base64) to the local `POST /extrair-agenda` endpoint in `servidor.py`, which writes it to a temp file and runs the Claude Code CLI (`claude -p … --allowedTools Read --model claude-sonnet-4-6`) with `ANTHROPIC_API_KEY` stripped from the env, so the OCR runs on the **subscription**, not the per-token API. Same headless-vs-CLI pattern as `../Transcrição exames/lab_transcribe.py`. The old direct `api.anthropic.com` call and the in-browser API-key modal were removed.
+- **Codex Vision** — `extractPatientsFromImage()` POSTs the JPEG (base64) to the local `POST /extrair-agenda` endpoint in `servidor.py`, which writes it to a temp file and runs the Codex CLI (`codex -p … --allowedTools Read --model Codex-sonnet-4-6`) with `ANTHROPIC_API_KEY` stripped from the env, so the OCR runs on the **subscription**, not the per-token API. Same headless-vs-CLI pattern as `../Transcrição exames/lab_transcribe.py`. The old direct `api.anthropic.com` call and the in-browser API-key modal were removed.
 - **State** — all app state in `App()`: `patients`, `fsGranted`, `syncPending`, `lastSync`, `fsSaving`, `view` (list | patient), `tab` (lista | graficos), `sort` (`{key, dir}` for the patient table), `filters` (`diagnostico`/`convenio`/`tratamento`/`terapia`/`status`, each `'todos'` by default — `terapia` matches against the `terapias` array via `includes`), `consultaPeriod` (`mes` | `semana` toggle on the consultations chart), `hiddenDx` (diagnoses hidden from the donut via its clickable legend)
 - **Charts** (`charts` useMemo, derived from `filtered`) — `dx`/`conv`/`trat` tallies, `ter` (terapias-celulares count, summed across each patient's `terapias` array), plus `mes` and `semana` (consultas grouped by ISO-week Monday). The diagnoses donut colours are keyed to the full `charts.dx` index so hiding a slice doesn't reshuffle colours
 - **Agenda import date** — `ImportModal` preview stage has a single `batchDate` date picker (defaults to `today()`) that overwrites `data` on every extracted row at once; per-row date inputs remain for mixed-day screenshots. `upsertFromAgenda` still falls back to `today()` for any row left without a date
@@ -119,7 +119,7 @@ Repository: **https://github.com/vcm-sudo/dashboard-hematologia**
 
 The `hema` alias is defined in `~/.zshrc`. On a new machine, add it manually:
 ```bash
-echo 'alias hema='"'"'open "/Users/viniciuscamposdemolla/pCloud Drive/_/Claude/Dashboard Hemato/iniciar-dashboard.command"'"'"'' >> ~/.zshrc
+echo 'alias hema='"'"'open "/Users/viniciuscamposdemolla/pCloud Drive/_/Codex/Dashboard Hemato/iniciar-dashboard.command"'"'"'' >> ~/.zshrc
 ```
 
 After editing the HTML, commit and push:
@@ -129,7 +129,7 @@ git commit -m "descrição da mudança"
 git push
 ```
 
-**Never stage `pacientes.json`.** It is the auto-sync output and contains real patient data (PHI). The HTML, `vendor/`, and `CLAUDE.md` are the tracked source. `.DS_Store` and `pacientes.json` were already committed in earlier history; if the repo is public this is a privacy exposure worth flagging.
+**Never stage `pacientes.json`.** It is the auto-sync output and contains real patient data (PHI). The HTML, `vendor/`, and `AGENTS.md` are the tracked source. `.DS_Store` and `pacientes.json` were already committed in earlier history; if the repo is public this is a privacy exposure worth flagging.
 
 ## Restoring data between browsers/machines
 

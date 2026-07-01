@@ -73,12 +73,9 @@ const { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip
 
 // ─── Storage ─────────────────────────────────────────────
 const KEY = 'hema_v3';
-const KEY_APIKEY = 'hema_apikey';
 const KEY_FS_GRANTED = 'hema_fs_granted';
 const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch { return []; } };
 const save = (d) => { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch {} };
-const loadKey = () => localStorage.getItem(KEY_APIKEY) || '';
-const saveKey = (k) => localStorage.setItem(KEY_APIKEY, k);
 
 // ─── IndexedDB — persiste o handle da pasta entre reloads ─
 const IDB_NAME = 'hema_fs_v1';
@@ -223,61 +220,26 @@ const terapiaPill = (t) => { const c = TC[t]||['#F0EDE6','#5C5C5C']; return { ba
 // ─── Normalise name ───────────────────────────────────────
 const normName = (n='') => n.trim().toUpperCase().replace(/\s+/g,' ');
 
-// ─── Claude vision extractor ──────────────────────────────
-async function extractPatientsFromImage(base64, mediaType, apiKey) {
-  const prompt = `Você está olhando para uma print de uma agenda médica hospitalar.
-Extraia TODOS os nomes de pacientes visíveis (ignore linhas como "FECHOU HORARIO", "REUNIAO" ou bloqueios de agenda).
-Para cada paciente, extraia o que for visível: nome completo, número de prontuário (se aparecer antes do nome), número de atendimento, horário.
-A data de hoje é ${today()}.
-
-Retorne APENAS um array JSON válido, sem markdown, sem explicação. Formato exato:
-[
-  {
-    "nome": "NOME COMPLETO DO PACIENTE",
-    "prontuario": "123456",
-    "atendimento": "7037268",
-    "data": "${today()}",
-    "hora": "09:00"
-  }
-]
-Se algum campo não for visível, omita-o ou use null. Retorne só o JSON, nada mais.`;
-
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+// ─── Claude vision extractor (via CLI da assinatura) ──────────────────────────────
+// A extração NÃO usa mais a API por token. O navegador manda a imagem (JPEG base64)
+// para o servidor local (servidor.py), que chama o Claude Code CLI pela assinatura.
+async function extractPatientsFromImage(base64, mediaType) {
+  const res = await fetch('/extrair-agenda', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2000,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-          { type: 'text', text: prompt }
-        ]
-      }]
-    })
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ b64: base64, mediaType })
   });
 
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `HTTP ${res.status}`);
+    throw new Error(data?.error || `HTTP ${res.status}`);
   }
-
-  const data = await res.json();
-  const text = data.content?.find(b => b.type === 'text')?.text || '';
-  const cleaned = text.replace(/```json|```/g,'').trim();
-  return JSON.parse(cleaned);
+  return Array.isArray(data.pacientes) ? data.pacientes : [];
 }
 
 // ─── Main App ─────────────────────────────────────────────
 function App() {
   const [patients, setPatients]     = useState(load);
-  const [apiKey, setApiKey]         = useState(loadKey);
   const [fsGranted, setFsGranted]   = useState(!!localStorage.getItem(KEY_FS_GRANTED));
   const [syncPending, setSyncPending] = useState(false);
   const [fsSaving, setFsSaving]     = useState(false);
@@ -288,7 +250,6 @@ function App() {
   const [filters, setFilters]       = useState({diagnostico:'todos',convenio:'todos',tratamento:'todos',terapia:'todos',status:'todos'});
   const [showAdd, setShowAdd]       = useState(false);
   const [showImport, setShowImport] = useState(false);
-  const [showKey, setShowKey]       = useState(false);
   const [toast, setToast]           = useState(null);
   const [tab, setTab]               = useState('lista');
   const [sort, setSort]             = useState({key:'ultimaConsulta', dir:'desc'});
@@ -584,10 +545,6 @@ function App() {
             </div>
           </div>
           <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
-            <button className="btn btn-ghost" style={{padding:'7px 10px'}} onClick={()=>setShowKey(true)} title="Configurar API Key Claude">
-              <I n="Key"/>
-              <span style={{fontSize:11}}>{apiKey ? 'Claude ✓' : 'Claude API'}</span>
-            </button>
             {/* Botão de sincronização com pCloud */}
             <button
               className="btn btn-ghost"
@@ -868,17 +825,14 @@ function App() {
       )}
       {showImport && (
         <ImportModal
-          apiKey={apiKey}
           onDone={(extracted) => {
             const {added, updated} = upsertFromAgenda(extracted);
             setShowImport(false);
             msg(`${added} novo(s) + ${updated} atualizado(s)`);
           }}
           onClose={()=>setShowImport(false)}
-          onNeedKey={()=>{setShowImport(false);setShowKey(true);}}
         />
       )}
-      {showKey && <ApiKeyModal apiKey={apiKey} onSave={(k)=>{saveKey(k);setApiKey(k);setShowKey(false);msg('Claude API Key salva');}} onClose={()=>setShowKey(false)}/>}
 
       {toast && (
         <div role="status" aria-live="polite" aria-atomic="true" style={{
@@ -989,7 +943,7 @@ function InfoField({label, icon, value}) {
 }
 
 // ─── Import Modal ─────────────────────────────────────────
-function ImportModal({ apiKey, onDone, onClose, onNeedKey }) {
+function ImportModal({ onDone, onClose }) {
   const [stage, setStage]         = useState('drop');
   const [dragging, setDragging]   = useState(false);
   const [loading, setLoading]     = useState(false);
@@ -1000,7 +954,6 @@ function ImportModal({ apiKey, onDone, onClose, onNeedKey }) {
   const fileRef = useRef();
 
   const processFiles = async (files) => {
-    if (!apiKey) { onNeedKey(); return; }
     setLoading(true); setError('');
     setLoadMsg(`Processando ${files.length} imagem(ns)…`);
     try {
@@ -1040,7 +993,7 @@ function ImportModal({ apiKey, onDone, onClose, onNeedKey }) {
       setLoadMsg(`Convertendo imagens…`);
       const converted = await Promise.all(files.map(convertToJpeg));
       setLoadMsg(`Enviando ${files.length} print(s) para Claude…`);
-      const results = await Promise.all(converted.map(({ b64, mt }) => extractPatientsFromImage(b64, mt, apiKey)));
+      const results = await Promise.all(converted.map(({ b64, mt }) => extractPatientsFromImage(b64, mt)));
       const seen = new Set(); const merged = [];
       for (const arr of results) for (const p of arr) {
         const key = normName(p.nome) + '|' + (p.atendimento || '');
@@ -1062,12 +1015,6 @@ function ImportModal({ apiKey, onDone, onClose, onNeedKey }) {
 
   return (
     <Modal title="Importar agenda" onClose={onClose} wide>
-      {!apiKey && (
-        <div style={{background:'#FEF5E7',border:'1px solid #F0D080',borderRadius:6,padding:'10px 14px',marginBottom:16,fontSize:13,color:'#7A5200',display:'flex',gap:8,alignItems:'center'}}>
-          <I n="Alert" s={14}/><span>Configure a <strong>API Key</strong> do Claude para extração automática.</span>
-          <button className="btn btn-secondary" style={{marginLeft:'auto',fontSize:12,padding:'4px 10px'}} onClick={onNeedKey}>Configurar</button>
-        </div>
-      )}
       {stage === 'drop' && (
         <>
           <div className={`dropzone${dragging?' drag-over':''}`} style={{padding:'48px 24px',textAlign:'center',marginBottom:16}}
@@ -1222,28 +1169,6 @@ function ConsultaForm({ consulta, onSave, onClose }) {
         <button className="btn btn-primary" onClick={()=>onSave({...consulta,...f})} disabled={!f.data}>
           {consulta ? 'Salvar' : 'Registrar'}
         </button>
-      </div>
-    </Modal>
-  );
-}
-
-// ─── API Key Modal ────────────────────────────────────────
-function ApiKeyModal({ apiKey, onSave, onClose }) {
-  const [k, setK] = useState(apiKey);
-  return (
-    <Modal title="API Key do Claude" onClose={onClose}>
-      <p style={{fontSize:13,color:'var(--muted)',marginBottom:12,lineHeight:1.6}}>
-        A extração automática de prints usa a API do Claude (Anthropic).<br/>
-        Sua chave fica salva <strong>apenas no seu navegador</strong> (localStorage) e nunca é enviada para nenhum servidor além da Anthropic.
-      </p>
-      <label className="label" htmlFor="ak-chave">Chave (começa com sk-ant-…)</label>
-      <input id="ak-chave" name="apikey" autoComplete="off" spellCheck={false} className="input mono" type="password" value={k} onChange={e=>setK(e.target.value)} placeholder="sk-ant-api03-…" style={{marginBottom:8}}/>
-      <p style={{fontSize:11,color:'var(--muted)',marginBottom:16}}>
-        Obtenha em <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style={{color:'var(--accent2)'}}>console.anthropic.com/settings/keys</a>
-      </p>
-      <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
-        <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
-        <button className="btn btn-primary" onClick={()=>onSave(k)} disabled={!k?.trim()}>Salvar chave</button>
       </div>
     </Modal>
   );
